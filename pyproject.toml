@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools >= 61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pipeline-migration-tool"
+requires-python = ">=3.12"
+authors = [
+    {name = "Konflux Build Team"},
+]
+description = "Pipeline migration tool for Konflux CI."
+readme = "README.md"
+license = {text = "Apache-2.0"}
+keywords = ["pipeline", "migration", "konflux", "ci"]
+classifiers = [
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development :: Build Tools",
+]
+dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://github.com/konflux-ci/pipeline-migration-tool"
+Documentation = "https://github.com/konflux-ci/pipeline-migration-tool/blob/main/README.md"
+Issues = "https://github.com/konflux-ci/pipeline-migration-tool/issues"
+
+[project.scripts]
+pipeline-migration-tool = "pipeline_migration.migrate:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "pipeline_migration.__version__"}

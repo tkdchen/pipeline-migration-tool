@@ -1,0 +1,7 @@
+*.swp
+*~
+
+*.egg-info/
+.venv
+dist/
+__pycache__/

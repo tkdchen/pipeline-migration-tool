@@ -21,6 +21,9 @@ classifiers = [
 ]
 dynamic = ["version"]
 
+[project.optional-dependencies]
+test = ["pytest", "pytest-cov", "tox"]
+
 [project.urls]
 Homepage = "https://github.com/konflux-ci/pipeline-migration-tool"
 Documentation = "https://github.com/konflux-ci/pipeline-migration-tool/blob/main/README.md"

@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "pipeline-migration-tool"
 requires-python = ">=3.12"
 authors = [
-    {name = "Konflux Build Team"},
+  {name = "Konflux Build Team"},
 ]
 description = "Pipeline migration tool for Konflux CI."
 readme = "README.md"
@@ -21,8 +21,19 @@ classifiers = [
 ]
 dynamic = ["version"]
 
+dependencies = [
+  "requests==2.32.3",
+  "ruamel.yaml==0.18.6",
+  "oras==0.2.25",
+]
+
 [project.optional-dependencies]
-test = ["pytest", "pytest-cov", "tox"]
+test = [
+  "pytest",
+  "pytest-cov",
+  "responses",
+  "tox",
+]
 
 [project.urls]
 Homepage = "https://github.com/konflux-ci/pipeline-migration-tool"
@@ -30,7 +41,21 @@ Documentation = "https://github.com/konflux-ci/pipeline-migration-tool/blob/main
 Issues = "https://github.com/konflux-ci/pipeline-migration-tool/issues"
 
 [project.scripts]
-pipeline-migration-tool = "pipeline_migration.migrate:main"
+pipeline-migration-tool = "pipeline_migration.cli:entry_point"
 
 [tool.setuptools.dynamic]
 version = {attr = "pipeline_migration.__version__"}
+
+[tool.pytest.ini_options]
+addopts = [
+    "--import-mode=importlib",
+]
+
+[tool.coverage.run]
+branch = true
+
+[tool.coverage.report]
+skip_covered = true
+omit = [
+  "tests/*"
+]

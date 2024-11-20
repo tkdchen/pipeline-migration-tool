@@ -2,6 +2,10 @@
 
 A migration tool does migrations for Konflux pipelines.
 
+## Run tests
+
+`tox`
+
 ## License
 
 Copyright 2024.

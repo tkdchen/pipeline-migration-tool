@@ -1,15 +1,11 @@
 import urllib.parse
 
 from dataclasses import dataclass
-from typing import Final
 
 from oras.provider import Registry as OrasRegistry
 from oras.container import Container as OrasContainer
 
 from pipeline_migration.types import AnnotationsT, ImageIndexT, DescriptorT
-
-
-MEDIA_TYPE_MANIFEST_V2: Final = "application/vnd.docker.distribution.manifest.v2+json"
 
 
 @dataclass

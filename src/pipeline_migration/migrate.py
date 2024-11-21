@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Final, Any
 
 from pipeline_migration.utils import FilePath, dump_yaml, load_yaml
-from pipeline_migration.registry import Container, Registry, MEDIA_TYPE_MANIFEST_V2, ImageIndex
+from pipeline_migration.registry import Container, Registry, ImageIndex
 from pipeline_migration.quay import QuayTagInfo, list_active_repo_tags
 
 # TODO: once the build-and-push.sh is done, correct this name if necessary
@@ -321,7 +321,7 @@ def fetch_migration_file(image: str, digest: str) -> str | None:
     c.digest = digest
     registry = Registry()
 
-    manifest = registry.get_manifest(c, allowed_media_type=[MEDIA_TYPE_MANIFEST_V2])
+    manifest = registry.get_manifest(c)
     has_migration = "true" == manifest.get("annotations", {}).get(MIGRATION_ANNOTATION, "false")
     if not has_migration:
         return
@@ -335,7 +335,7 @@ def fetch_migration_file(image: str, digest: str) -> str | None:
     ]
     if descriptors:
         c.digest = descriptors[0].digest
-        manifest = registry.get_manifest(c, allowed_media_type=[MEDIA_TYPE_MANIFEST_V2])
+        manifest = registry.get_manifest(c)
         descriptor = manifest["layers"][0]
         return registry.get_blob(c, descriptor["digest"]).content.decode("utf-8")
 

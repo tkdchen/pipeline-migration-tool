@@ -37,6 +37,11 @@ class ImageIndex:
 class Container(OrasContainer):
 
     @property
+    def referrers_url(self) -> str:
+        # https://<registry>/v2/<repository>/referrers/<digest>?artifactType=<artifact type>
+        return f"{self.registry}/v2/{self.api_prefix}/referrers/{self.digest}"
+
+    @property
     def uri_with_tag(self) -> str:
         """Include the tag in the uri
 
@@ -61,10 +66,9 @@ class Registry(OrasRegistry):
         :return: the raw JSON responded by the registry. That is an image
             index, where manifests field are the images referring the given one.
         """
-        # https://<registry>/v2/<repository>/referrers/<digest>?artifactType=<artifact type>
         if not c.digest:
             raise ValueError("Missing digest in image.")
-        referrers_api = f"https://{c.registry}/v1/{c.namespace}/{c.repository}/referrers/{c.digest}"
+        referrers_api = f"{self.prefix}://{c.referrers_url}"
         query_args = ""
         if artifact_type:
             query_args = urllib.parse.urlencode([("artifactType", artifact_type)])

@@ -21,6 +21,7 @@ BUILD_DEFINITIONS_REPO: Final = "konflux-ci/build-definitions"
 
 TEKTON_KIND_PIPELINE: Final = "Pipeline"
 TEKTON_KIND_PIPELINE_RUN: Final = "PipelineRun"
+ANNOTATION_TRUTH_VALUE: Final = "true"
 
 # Example:  0.1-18a61693389c6c912df587f31bc3b4cc53eb0d5b
 TASK_TAG_REGEXP: Final = r"^[0-9.]+-[0-9a-f]+$"
@@ -242,11 +243,11 @@ class TaskBundleUpgradesManager:
             pf.task_bundle_upgrades.append(tb_update)
 
     @staticmethod
-    def _resolve_migrations_for_an_upgrade(task_bundle_upgrade: TaskBundleUpgrade) -> None:
+    def _resolve_migrations_for_an_upgrade(
+        task_bundle_upgrade: TaskBundleUpgrade,
+    ) -> Generator[TaskBundleMigration, Any, None]:
         upgrades_range = determine_task_bundle_upgrades_range(task_bundle_upgrade)
-        # Quay.io lists tags from the newest to the oldest one.
-        # Migrations must be applied in the reverse order.
-        for tag_info in reversed(upgrades_range):
+        for tag_info in upgrades_range:
             c = Container(task_bundle_upgrade.dep_name)
             c.tag = tag_info.name
             c.digest = tag_info.manifest_digest
@@ -263,10 +264,17 @@ class TaskBundleUpgradesManager:
     def resolve_migrations(self) -> None:
         """Resolve migrations for given task bundle upgrades"""
         for tb_upgrade in self._task_bundle_upgrades.values():
-            self._resolve_migrations_for_an_upgrade(tb_upgrade)
+            for tb_migration in self._resolve_migrations_for_an_upgrade(tb_upgrade):
+                tb_upgrade.migrations.append(tb_migration)
+            # Quay.io lists tags from the newest to the oldest one.
+            # Migrations must be applied in the reverse order.
+            tb_upgrade.migrations.reverse()
 
     @staticmethod
     def _apply_migration(pipeline_file: FilePath, migration: TaskBundleMigration) -> None:
+        if not os.path.exists(pipeline_file):
+            raise ValueError(f"Pipeline file does not exist: {pipeline_file}")
+
         logger.info(
             "Apply migration of task bundle %s in package file %s",
             migration.task_bundle,
@@ -282,7 +290,7 @@ class TaskBundleUpgradesManager:
         with resolve_pipeline(pipeline_file) as file_path:
             logger.info("Executing migration script %s on %s", migration_file, file_path)
             try:
-                subprocess.run(["bash", "-e", migration_file, file_path], check=True)
+                subprocess.run(["bash", "-e", file_path, migration_file], check=True)
             finally:
                 os.unlink(migration_file)
 
@@ -294,7 +302,7 @@ class TaskBundleUpgradesManager:
 
 
 def is_true(value: str) -> bool:
-    return value.strip().lower() == "true"
+    return value.strip().lower() == ANNOTATION_TRUTH_VALUE
 
 
 def fetch_migration_file(image: str, digest: str) -> str | None:
@@ -308,13 +316,13 @@ def fetch_migration_file(image: str, digest: str) -> str | None:
         bundle, None is returned.
     """
     c = Container(image)
-    if c.tag or c.digest:
-        raise ValueError("Image should not include tag or digest.")
+    if c.digest:
+        raise ValueError("Image should not include digest.")
     c.digest = digest
     registry = Registry()
 
     manifest = registry.get_manifest(c, allowed_media_type=[MEDIA_TYPE_MANIFEST_V2])
-    has_migration = "yes" == manifest.get("annotation", {}).get(MIGRATION_ANNOTATION, "false")
+    has_migration = "true" == manifest.get("annotations", {}).get(MIGRATION_ANNOTATION, "false")
     if not has_migration:
         return
 
@@ -323,11 +331,11 @@ def fetch_migration_file(image: str, digest: str) -> str | None:
     descriptors = [
         descriptor
         for descriptor in image_index.manifests
-        if is_true(descriptor.annotations.get(MIGRATION_ANNOTATION))
+        if is_true(descriptor.annotations.get(MIGRATION_ANNOTATION, "false"))
     ]
     if descriptors:
-        c.digest = digest
-        manifest = registry.get_manifest(c.manifest_url())
+        c.digest = descriptors[0].digest
+        manifest = registry.get_manifest(c, allowed_media_type=[MEDIA_TYPE_MANIFEST_V2])
         descriptor = manifest["layers"][0]
         return registry.get_blob(c, descriptor["digest"]).content.decode("utf-8")
 

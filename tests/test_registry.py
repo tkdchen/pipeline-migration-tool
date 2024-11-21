@@ -18,7 +18,7 @@ def test_container_uri_with_tag(tag):
         assert c.uri_with_tag == c.uri
 
 
-DEFAULT_DESCRIPTOR: DescriptorT = {
+REFERRER_DESCRIPTOR: DescriptorT = {
     "mediaType": "image.manifest",
     "digest": "sha256:1234567",
     "size": 100,
@@ -30,12 +30,12 @@ DEFAULT_DESCRIPTOR: DescriptorT = {
 class TestDescriptor:
 
     def test_get_digest(self):
-        descriptor = DEFAULT_DESCRIPTOR.copy()
+        descriptor = REFERRER_DESCRIPTOR.copy()
         d = Descriptor(data=descriptor)
         assert d.digest == descriptor["digest"]
 
     def test_get_annotations(self):
-        descriptor = DEFAULT_DESCRIPTOR.copy()
+        descriptor = REFERRER_DESCRIPTOR.copy()
         descriptor["annotations"]["key"] = "value"
         d = Descriptor(data=descriptor)
         assert d.annotations == descriptor["annotations"]
@@ -45,7 +45,7 @@ def test_image_index_get_manifest():
     index_json: ImageIndexT = {
         "schemaVersion": 2,
         "mediaType": "index",
-        "manifests": [DEFAULT_DESCRIPTOR.copy()],
+        "manifests": [REFERRER_DESCRIPTOR.copy()],
         "annotations": {},
     }
     manifests = ImageIndex(data=index_json).manifests
@@ -64,12 +64,12 @@ class TestListReferrers:
         digest = generate_digest()
         c = Container(f"reg.io/ns/app@{digest}")
         referrers = [
-            DEFAULT_DESCRIPTOR.copy(),
-            DEFAULT_DESCRIPTOR.copy(),
-            DEFAULT_DESCRIPTOR.copy(),
+            REFERRER_DESCRIPTOR.copy(),
+            REFERRER_DESCRIPTOR.copy(),
+            REFERRER_DESCRIPTOR.copy(),
         ]
         responses.get(
-            f"https://reg.io/v1/ns/app/referrers/{digest}",
+            f"https://{c.referrers_url}",
             json={"schemaVersion": 2, "manifests": referrers, "annotations": {}},
         )
         image_index = Registry().list_referrers(c)
@@ -79,9 +79,9 @@ class TestListReferrers:
     def test_list_referrers_by_artifact_type(self):
         digest = generate_digest()
         c = Container(f"reg.io/ns/app@{digest}")
-        referrers = [DEFAULT_DESCRIPTOR.copy()]
+        referrers = [REFERRER_DESCRIPTOR.copy()]
         responses.get(
-            f"https://reg.io/v1/ns/app/referrers/{digest}?artifactType=text/plain",
+            f"https://{c.referrers_url}?artifactType=text/plain",
             json={"schemaVersion": 2, "manifests": referrers, "annotations": {}},
         )
         image_index = Registry().list_referrers(c, "text/plain")
@@ -93,7 +93,7 @@ class TestListReferrers:
         digest = generate_digest()
         c = Container(f"reg.io/ns/app@{digest}")
         errors_json = {"errors": [{"message": "something is wrong"}]}
-        responses.get(f"https://reg.io/v1/ns/app/referrers/{digest}", json=errors_json, status=500)
+        responses.get(f"https://{c.referrers_url}", json=errors_json, status=500)
         with pytest.raises(ValueError, match="Issue with .+ Internal Server Error"):
             Registry().list_referrers(c)
         assert "something is wrong" in caplog.text

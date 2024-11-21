@@ -1,20 +1,29 @@
+import os
+import itertools
+from copy import deepcopy
 from textwrap import dedent
+from typing import Any, Final
 
 import responses
 import pytest
 
-from typing import Final
-
 from pipeline_migration.migrate import (
+    ANNOTATION_TRUTH_VALUE,
     determine_task_bundle_upgrades_range,
-    TaskBundleUpgrade,
+    fetch_migration_file,
     InvalidRenovateUpgradesData,
+    MIGRATION_ANNOTATION,
     resolve_pipeline,
+    TaskBundleMigration,
+    TaskBundleUpgrade,
+    TaskBundleUpgradesManager,
 )
 from pipeline_migration.quay import QuayTagInfo
 from pipeline_migration.registry import Container
+from pipeline_migration.types import ManifestT
 from pipeline_migration.utils import load_yaml, dump_yaml
 from tests.utils import generate_digest
+from tests.test_registry import REFERRER_DESCRIPTOR
 
 # Tags are listed from the latest to the oldest one.
 SAMPLE_TAGS_OF_NS_APP: Final = [
@@ -29,6 +38,9 @@ SAMPLE_TAGS_OF_NS_APP: Final = [
 ]
 
 APP_IMAGE_REPO: Final = "reg.io/ns/app"
+TASK_BUNDLE_CLONE: Final = "quay.io/konflux-ci/task-clone"
+TASK_BUNDLE_TESTS: Final = "quay.io/konflux-ci/task-tests"
+TASK_BUNDLE_LINT: Final = "quay.io/konflux-ci/task-lint"
 
 
 class TestDetermineTaskBundleUpdatesRange:
@@ -134,10 +146,6 @@ class TestDetermineTaskBundleUpdatesRange:
         else:
             with pytest.raises(expected):
                 determine_task_bundle_upgrades_range(task_bundle_upgrade)
-
-
-class TestFetchMigrationFile:
-    """Test method fetch_migration_file"""
 
 
 class TestTaskBundleUpgrade:
@@ -366,3 +374,429 @@ class TestResolvePipeline:
         with pytest.raises(ValueError, match="does not have knownn kind Pipeline or PipelineRun"):
             with resolve_pipeline(pipeline_file):
                 pass
+
+
+RENOVATE_UPGRADES: list[dict[str, Any]] = [
+    # for pull request
+    {
+        "depName": TASK_BUNDLE_CLONE,
+        "currentValue": "0.1",
+        "currentDigest": "sha256:3a30d8fce9ce",
+        "newValue": "0.1",
+        "newDigest": "sha256:3356f7c38aea",
+        "packageFile": ".tekton/component-a-pull-request.yaml",
+        "parentDir": ".tekton/",
+        "depTypes": ["tekton-bundle"],
+    },
+    {
+        "depName": TASK_BUNDLE_TESTS,
+        "currentValue": "0.1",
+        "currentDigest": "sha256:492fb9ae4e7a",
+        "newValue": "0.2",
+        "newDigest": "sha256:96e797480ac5",
+        "packageFile": ".tekton/component-a-pull-request.yaml",
+        "parentDir": ".tekton/",
+        "depTypes": ["tekton-bundle"],
+    },
+    {
+        "depName": TASK_BUNDLE_LINT,
+        "currentValue": "0.1",
+        "currentDigest": "sha256:193c17d08e13",
+        "newValue": "0.1",
+        "newDigest": "sha256:47c9dac9c222",
+        "packageFile": ".tekton/component-a-pull-request.yaml",
+        "parentDir": ".tekton/",
+        "depTypes": ["tekton-bundle"],
+    },
+    # for push
+    {
+        "depName": TASK_BUNDLE_CLONE,
+        "currentValue": "0.1",
+        "currentDigest": "sha256:3a30d8fce9ce",
+        "newValue": "0.1",
+        "newDigest": "sha256:3356f7c38aea",
+        "packageFile": ".tekton/component-a-push.yaml",
+        "parentDir": ".tekton/",
+        "depTypes": ["tekton-bundle"],
+    },
+    {
+        "depName": TASK_BUNDLE_TESTS,
+        "currentValue": "0.1",
+        "currentDigest": "sha256:492fb9ae4e7a",
+        "newValue": "0.2",
+        "newDigest": "sha256:96e797480ac5",
+        "packageFile": ".tekton/component-a-push.yaml",
+        "parentDir": ".tekton/",
+        "depTypes": ["tekton-bundle"],
+    },
+]
+
+
+class TestTaskBundleUpgradesManagerCollectUpgrades:
+
+    def setup_method(self, method):
+        self.test_upgrades = deepcopy(RENOVATE_UPGRADES)
+
+    def test_collect_upgrades(self):
+        manager = TaskBundleUpgradesManager(self.test_upgrades)
+        assert len(manager._task_bundle_upgrades) == 3
+
+    def test_raise_error_if_missing_field(self):
+        del self.test_upgrades[-1]["currentValue"]
+        with pytest.raises(InvalidRenovateUpgradesData, match="Missing field currentValue"):
+            TaskBundleUpgradesManager(self.test_upgrades)
+
+    def test_skip_non_konflux_bundles(self):
+        """
+        Modify a task bundle for push package file, then check the number of collected upgrades,
+        which is less than the number of upgrades of push in the APP_IMAGE_REPO.
+        """
+        upgrade = [
+            upgrade
+            for upgrade in self.test_upgrades
+            if upgrade["depName"].endswith("-tests")
+            and upgrade["packageFile"].endswith("push.yaml")
+        ]
+        upgrade[0]["depName"] = APP_IMAGE_REPO
+
+        manager = TaskBundleUpgradesManager(self.test_upgrades)
+        package_files = [
+            package_file
+            for package_file in manager.package_files
+            if package_file.file_path.endswith("push.yaml")
+        ]
+        assert len(package_files[0].task_bundle_upgrades) == 1
+
+    def test_missing_dep_types(self):
+        for upgrade in self.test_upgrades:
+            del upgrade["depTypes"]
+        with pytest.raises(InvalidRenovateUpgradesData, match="depTypes is missing"):
+            TaskBundleUpgradesManager(self.test_upgrades)
+
+    def test_do_not_include_upgrade_by_tekton_bundle_manager(self):
+        for upgrade in self.test_upgrades:
+            if upgrade["packageFile"].endswith("push.yaml"):
+                upgrade["depTypes"] = ["some-other-renovate-manager"]
+
+        manager = TaskBundleUpgradesManager(self.test_upgrades)
+        package_files = set([upgrade["packageFile"] for upgrade in self.test_upgrades])
+        assert len(package_files) > len(manager._package_file_updates)
+
+
+IMAGE_MANIFEST: ManifestT = {
+    "schemaVersion": 2,
+    "mediaType": "application/vnd.oci.image.manifest.v1+json",
+    "config": {
+        "mediaType": "application/vnd.oci.image.config.v1+json",
+        "digest": "sha256:070f25377bd2436ae765bfcc36cd47e9e153cd479d1c0fa147929dd2e1fe21f8",
+        "size": 100,
+    },
+    "layers": [
+        {
+            "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+            "digest": "sha256:498ce84ac04c70f2bce9630eec216a33f8ab0f345702a830826548f773e351ec",
+            "size": 200,
+        },
+    ],
+    "annotations": {},
+}
+
+
+class TestFetchMigrationFile:
+
+    def setup_method(self, method):
+        self.image_digest = generate_digest()
+
+    def test_fail_if_image_has_tag_or_digest(self):
+        with pytest.raises(ValueError, match="should not include digest"):
+            fetch_migration_file(f"{APP_IMAGE_REPO}@{self.image_digest}", self.image_digest)
+
+    @responses.activate
+    def test_task_bundle_has_no_migration_annotation(self):
+        c = Container(APP_IMAGE_REPO)
+        c.digest = self.image_digest
+        bundle_manifest = deepcopy(IMAGE_MANIFEST)
+        bundle_manifest["annotations"] = {}  # clear explicitly
+        responses.get(f"https://{c.manifest_url()}", json=bundle_manifest)
+
+        r = fetch_migration_file(APP_IMAGE_REPO, self.image_digest)
+        assert r is None
+
+    @responses.activate
+    def test_no_referrer_with_expected_artifact_type(self):
+        c = Container(APP_IMAGE_REPO)
+        c.digest = self.image_digest
+        bundle_manifest = deepcopy(IMAGE_MANIFEST)
+        bundle_manifest["annotations"] = {MIGRATION_ANNOTATION: ANNOTATION_TRUTH_VALUE}
+        responses.get(f"https://{c.manifest_url()}", json=bundle_manifest)
+
+        referrers = []  # No referrer
+        responses.get(
+            f"https://{c.referrers_url}?artifactType=text/x-shellscript",
+            json={"schemaVersion": 2, "manifests": referrers, "annotations": {}},
+        )
+
+        r = fetch_migration_file(APP_IMAGE_REPO, self.image_digest)
+        assert r is None
+
+    @responses.activate
+    def test_no_referrer_with_migration_annotation(self):
+        c = Container(APP_IMAGE_REPO)
+        c.digest = self.image_digest
+        bundle_manifest = deepcopy(IMAGE_MANIFEST)
+        bundle_manifest["annotations"] = {MIGRATION_ANNOTATION: ANNOTATION_TRUTH_VALUE}
+        responses.get(f"https://{c.manifest_url()}", json=bundle_manifest)
+
+        referrer = deepcopy(REFERRER_DESCRIPTOR)
+        referrer["annotations"] = {}
+        responses.get(
+            f"https://{c.referrers_url}?artifactType=text/x-shellscript",
+            json={"schemaVersion": 2, "manifests": [referrer], "annotations": {}},
+        )
+
+        r = fetch_migration_file(APP_IMAGE_REPO, self.image_digest)
+        assert r is None
+
+    @responses.activate
+    def test_migration_file_is_fetched(self):
+        c = Container(APP_IMAGE_REPO)
+        c.digest = self.image_digest
+        bundle_manifest = deepcopy(IMAGE_MANIFEST)
+        bundle_manifest["annotations"] = {MIGRATION_ANNOTATION: ANNOTATION_TRUTH_VALUE}
+        responses.get(f"https://{c.manifest_url()}", json=bundle_manifest)
+
+        # mock there is a referrer with specific artifactType and annotation
+        referrer_descriptor = deepcopy(REFERRER_DESCRIPTOR)
+        referrer_descriptor["annotations"] = {MIGRATION_ANNOTATION: ANNOTATION_TRUTH_VALUE}
+        image_index = {"schemaVersion": 2, "manifests": [referrer_descriptor], "annotations": {}}
+        responses.get(
+            f"https://{c.referrers_url}?artifactType=text/x-shellscript", json=image_index
+        )
+
+        layer_digest: Final = generate_digest()
+
+        # mock getting referrer image manifest
+        referrer_manifest = deepcopy(IMAGE_MANIFEST)
+        referrer_manifest["layers"][0]["digest"] = layer_digest
+        c.digest = referrer_descriptor["digest"]
+        responses.get(f"https://{c.manifest_url()}", json=referrer_manifest)
+
+        # mock getting referrer's layer blob, i.e. the content
+        responses.get(f"https://{c.get_blob_url(layer_digest)}", body=b"echo hello world")
+
+        r = fetch_migration_file(APP_IMAGE_REPO, self.image_digest)
+        assert r == "echo hello world"
+
+
+class TestResolveMigrations:
+
+    @responses.activate
+    def test_no_tag_is_listed_by_registry(self):
+        renovate_upgrades = deepcopy(RENOVATE_UPGRADES)[:1]
+        manager = TaskBundleUpgradesManager(renovate_upgrades)
+        tb_upgrade = list(manager._task_bundle_upgrades.items())[0][1]
+
+        c = Container(tb_upgrade.dep_name)
+        responses.get(
+            f"https://quay.io/api/v1/repository/{c.api_prefix}/tag/?page=1&onlyActiveTags=true",
+            json={"tags": [], "page": 1, "has_additional": False},
+        )
+
+        manager.resolve_migrations()
+        assert len(tb_upgrade.migrations) == 0
+
+    @responses.activate
+    def test_migrations_are_resolved(self, monkeypatch):
+        renovate_upgrades = deepcopy(RENOVATE_UPGRADES)[:1]
+        manager = TaskBundleUpgradesManager(renovate_upgrades)
+
+        # THIS. Fetch migrations for this upgrade
+        tb_upgrade: Final = list(manager._task_bundle_upgrades.items())[0][1]
+
+        digests_of_images_having_migration = [generate_digest(), generate_digest()]
+
+        tags_info = [
+            {
+                "name": f"{tb_upgrade.new_value}-837e2cd",
+                "manifest_digest": tb_upgrade.new_digest,
+            },
+            # Make this one have a migration
+            {
+                "name": f"{tb_upgrade.new_value}-5678abc",
+                "manifest_digest": digests_of_images_having_migration[0],
+            },
+            # Make this one have a migration
+            {
+                "name": f"{tb_upgrade.new_value}-238f2a7",
+                "manifest_digest": digests_of_images_having_migration[1],
+            },
+            {
+                "name": f"{tb_upgrade.current_value}-127a2be",
+                "manifest_digest": tb_upgrade.current_digest,
+            },
+        ]
+
+        c = Container(tb_upgrade.dep_name)
+        responses.get(
+            f"https://quay.io/api/v1/repository/{c.api_prefix}/tag/?page=1&onlyActiveTags=true",
+            json={"tags": tags_info, "page": 1, "has_additional": False},
+        )
+
+        script_content: Final = "echo add a new task to pipeline"
+
+        def _fetch_migration_file(image: str, digest: str) -> str | None:
+            if digest in digests_of_images_having_migration:
+                return script_content
+
+        monkeypatch.setattr(
+            "pipeline_migration.migrate.fetch_migration_file", _fetch_migration_file
+        )
+
+        manager.resolve_migrations()
+        migrations = list(tb_upgrade.migrations)
+        assert len(migrations) == 2
+
+        # Verify the correct order.
+        c.tag = tags_info[1]["name"]
+        c.digest = tags_info[1]["manifest_digest"]
+        assert c.uri_with_tag == migrations[1].task_bundle
+        assert script_content == migrations[1].migration_script
+
+        c.tag = tags_info[2]["name"]
+        c.digest = tags_info[2]["manifest_digest"]
+        assert c.uri_with_tag == migrations[0].task_bundle
+        assert script_content == migrations[0].migration_script
+
+
+PIPELINE_DEFINITION: Final = dedent(
+    """\
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: pl
+spec:
+  tasks:
+  - name: clone
+    image: debian:latest
+    script: |
+      git clone https://git.host/project
+"""
+)
+
+
+class TestApplyMigrations:
+
+    @pytest.mark.parametrize("chdir", [True, False])
+    def test_apply_single_migration(self, chdir, monkeypatch, tmp_path):
+        """Test applying a single migration to a pipeline file
+
+        The migration tool aims to run inside a component repository, from
+        where the packageFile is accessed by a relative path. Test parameter
+        ``chdir`` indicates to change the working directory for this test to
+        test the different behaviors.
+        """
+        test_context = {"bash_run": False, "temp_files": []}
+        counter = itertools.count()
+        migration_script: Final = "echo hello world"
+
+        def _mkstemp(*args, **kwargs):
+            tmp_file_path = tmp_path / f"temp_file-{next(counter)}"
+            tmp_file_path.write_text("")
+            fd = os.open(tmp_file_path, os.O_RDWR)
+            test_context["temp_files"].append((fd, tmp_file_path))
+            return fd, tmp_file_path
+
+        def subprocess_run(*args, **kwargs):
+            cmd = args[0]
+            assert cmd[:2] == ["bash", "-e"]
+            with open(cmd[2], "r") as f:
+                assert f.read() == PIPELINE_DEFINITION
+            with open(cmd[3], "r") as f:
+                assert f.read() == migration_script
+            assert kwargs.get("check")
+            test_context["bash_run"] = True
+
+        monkeypatch.setattr("tempfile.mkstemp", _mkstemp)
+        monkeypatch.setattr("subprocess.run", subprocess_run)
+
+        pipeline_file: Final = tmp_path / "pipeline.yaml"
+        pipeline_file.write_text(PIPELINE_DEFINITION)
+
+        renovate_upgrades = deepcopy(RENOVATE_UPGRADES)
+        manager = TaskBundleUpgradesManager(renovate_upgrades)
+
+        tb_migration = TaskBundleMigration("task-bundle:0.3@sha256:1234", migration_script)
+        if chdir:
+            monkeypatch.chdir(tmp_path)
+            manager._apply_migration("pipeline.yaml", tb_migration)
+        else:
+            with pytest.raises(ValueError, match="Pipeline file does not exist: pipeline.yaml"):
+                manager._apply_migration("pipeline.yaml", tb_migration)
+            return
+
+        assert test_context["bash_run"]
+        assert len(test_context["temp_files"]) > 0
+        for _, file_path in test_context["temp_files"]:
+            assert not os.path.exists(file_path)
+
+    def test_apply_migrations(self, tmp_path, monkeypatch):
+        """Ensure applying all resolved migrations"""
+
+        renovate_upgrades = [
+            {
+                "depName": TASK_BUNDLE_CLONE,
+                "currentValue": "0.1",
+                "currentDigest": "sha256:cff6b68a194a",
+                "newValue": "0.2",
+                "newDigest": "sha256:96e797480ac5",
+                "depTypes": ["tekton-bundle"],
+                "packageFile": ".tekton/pipeline.yaml",
+                "parentDir": ".tekton",
+            },
+        ]
+        manager = TaskBundleUpgradesManager(renovate_upgrades)
+
+        # Not really resolve migrations. Mock them instead, then apply.
+        tb_upgrade = list(manager._task_bundle_upgrades.values())[0]
+        c = Container(tb_upgrade.dep_name)
+
+        c.tag = tb_upgrade.new_value
+        c.digest = generate_digest()
+        tb_upgrade.migrations.append(
+            TaskBundleMigration(task_bundle=c.uri_with_tag, migration_script="echo add a new task")
+        )
+
+        c.tag = tb_upgrade.new_value
+        c.digest = tb_upgrade.new_digest
+        tb_upgrade.migrations.append(
+            TaskBundleMigration(
+                task_bundle=c.uri_with_tag, migration_script="echo remove task param"
+            )
+        )
+
+        tekton_dir = tmp_path / ".tekton"
+        tekton_dir.mkdir()
+        package_file = tekton_dir / "pipeline.yaml"
+        package_file.write_text(PIPELINE_DEFINITION)
+
+        test_context = {"executed_scripts": []}
+        counter = itertools.count()
+
+        def _mkstemp(*args, **kwargs):
+            tmp_file_path = tmp_path / f"temp_file-{next(counter)}"
+            tmp_file_path.write_text("")
+            fd = os.open(tmp_file_path, os.O_RDWR)
+            return fd, tmp_file_path
+
+        def subprocess_run(*args, **kwargs):
+            cmd = args[0]
+            with open(cmd[3], "r") as f:
+                test_context["executed_scripts"].append(f.read())
+
+        monkeypatch.setattr("tempfile.mkstemp", _mkstemp)
+        monkeypatch.setattr("subprocess.run", subprocess_run)
+
+        monkeypatch.chdir(tmp_path)
+        manager.apply_migrations()
+
+        assert test_context["executed_scripts"] == ["echo add a new task", "echo remove task param"]

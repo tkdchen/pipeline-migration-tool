@@ -1,10 +1,14 @@
+import json
 import urllib.parse
 
 from dataclasses import dataclass
 
 from oras.provider import Registry as OrasRegistry
 from oras.container import Container as OrasContainer
+from oras.decorator import ensure_container
+from oras.types import container_type
 
+from pipeline_migration.cache import get_cache
 from pipeline_migration.types import AnnotationsT, ImageIndexT, DescriptorT
 
 
@@ -52,7 +56,32 @@ class Container(OrasContainer):
 
 class Registry(OrasRegistry):
 
-    def list_referrers(self, c: Container, artifact_type: str | None = None) -> ImageIndexT:
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._cache = get_cache()
+
+    @ensure_container
+    def get_manifest(
+        self, container: container_type, allowed_media_type: list | None = None
+    ) -> dict:
+        key = f"manifest-{container.namespace}-{container.repository}-{container.digest}"
+        if (v := self._cache.get(key)) is None:
+            manifest = super().get_manifest(container, allowed_media_type)
+            self._cache.set(key, json.dumps(manifest))
+            return manifest
+        else:
+            return json.loads(v)
+
+    @ensure_container
+    def get_artifact(self, container: container_type, digest: str) -> str:
+        key = f"blob-{container.namespace}-{container.repository}-{digest}"
+        if (v := self._cache.get(key)) is None:
+            resp = self.get_blob(container, digest)
+            v = resp.content.decode("utf-8")
+            self._cache.set(key, v)
+        return v
+
+    def _list_referrers(self, c: Container, artifact_type: str | None = None) -> ImageIndexT:
         """List referrers of given image
 
         :param c: a Container object representing an image.
@@ -72,3 +101,15 @@ class Registry(OrasRegistry):
         resp = self.do_request(referrers_api)
         self._check_200_response(resp)
         return resp.json()
+
+    @ensure_container
+    def list_referrers(
+        self, container: container_type, artifact_type: str | None = None
+    ) -> ImageIndexT:
+        key = f"referrers-{container.namespace}-{container.repository}-{container.digest}"
+        if (v := self._cache.get(key)) is None:
+            image_index = self._list_referrers(container, artifact_type)
+            self._cache.set(key, json.dumps(image_index))
+            return image_index
+        else:
+            return json.loads(v)

@@ -25,6 +25,13 @@ from pipeline_migration.utils import load_yaml, dump_yaml
 from tests.utils import generate_digest
 from tests.test_registry import REFERRER_DESCRIPTOR
 
+
+@pytest.fixture(autouse=True)
+def disable_cache(monkeypatch):
+    """Disable file-based cache for tests in this module"""
+    monkeypatch.setenv("FILE_BASED_CACHE_DISABLED", "true")
+
+
 # Tags are listed from the latest to the oldest one.
 SAMPLE_TAGS_OF_NS_APP: Final = [
     {"name": "0.3-0c9b02c", "manifest_digest": "sha256:bfc0c3c"},
@@ -483,6 +490,7 @@ class TestTaskBundleUpgradesManagerCollectUpgrades:
         assert len(package_files) > len(manager._package_file_updates)
 
 
+# TODO: use the image_manifest fixture instead
 IMAGE_MANIFEST: ManifestT = {
     "schemaVersion": 2,
     "mediaType": "application/vnd.oci.image.manifest.v1+json",

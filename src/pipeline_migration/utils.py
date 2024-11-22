@@ -4,6 +4,10 @@ from ruamel.yaml import YAML
 from pipeline_migration.types import FilePath
 
 
+def is_true(value: str) -> bool:
+    return value.strip().lower() == "true"
+
+
 def create_yaml_obj():
     yaml = YAML()
     yaml.preserve_quotes = True

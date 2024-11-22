@@ -19,7 +19,7 @@ class ImageIndexT(TypedDict):
     schemaVersion: int
     mediaType: str
     manifests: list[DescriptorT]
-    annotations: AnnotationsT
+    annotations: NotRequired[AnnotationsT]
 
 
 class ManifestT(TypedDict):

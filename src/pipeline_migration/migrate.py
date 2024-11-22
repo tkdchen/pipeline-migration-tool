@@ -7,12 +7,12 @@ import tempfile
 from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Final, Any
 
 from pipeline_migration.utils import FilePath, dump_yaml, load_yaml
 from pipeline_migration.registry import Container, Registry, ImageIndex
 from pipeline_migration.quay import QuayTagInfo, list_active_repo_tags
+from pipeline_migration.utils import is_true
 
 # TODO: once the build-and-push.sh is done, correct this name if necessary
 MIGRATION_ANNOTATION: Final[str] = "dev.konflux-ci.task.migration"
@@ -301,10 +301,6 @@ class TaskBundleUpgradesManager:
                     self._apply_migration(package_file.file_path, migration)
 
 
-def is_true(value: str) -> bool:
-    return value.strip().lower() == ANNOTATION_TRUTH_VALUE
-
-
 def fetch_migration_file(image: str, digest: str) -> str | None:
     """Fetch migration file for a task bundle
 
@@ -337,10 +333,10 @@ def fetch_migration_file(image: str, digest: str) -> str | None:
         c.digest = descriptors[0].digest
         manifest = registry.get_manifest(c)
         descriptor = manifest["layers"][0]
-        return registry.get_blob(c, descriptor["digest"]).content.decode("utf-8")
+        return registry.get_artifact(c, descriptor["digest"])
 
 
-def migrate(upgrades: list[dict[str, Any]], cache_dir: Path) -> None:
+def migrate(upgrades: list[dict[str, Any]]) -> None:
     """The core method doing the migrations
 
     :param upgrades: upgrades data, that follows the schema of Renovate template field ``upgrades``.

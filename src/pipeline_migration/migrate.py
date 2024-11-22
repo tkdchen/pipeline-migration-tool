@@ -341,8 +341,6 @@ def migrate(upgrades: list[dict[str, Any]]) -> None:
 
     :param upgrades: upgrades data, that follows the schema of Renovate template field ``upgrades``.
     :type upgrades: list[dict[str, any]]
-    :param cache_dir:
-    :type cache_dir: str
     """
     manager = TaskBundleUpgradesManager(upgrades)
     manager.resolve_migrations()

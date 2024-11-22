@@ -66,17 +66,37 @@ class TestFileBasedCacheSet:
             c.set("", "some content")
 
 
-@pytest.mark.parametrize("create_dir", [True, False])
-def test_set_cache_dir(create_dir, monkeypatch, tmp_path):
-    cache_dir = tmp_path / "test-cache-dir"
-    if create_dir:
-        cache_dir.mkdir()
-    if create_dir:
-        set_cache_dir(str(cache_dir))
-        assert os.environ[ENV_FBC_DIR] == str(cache_dir)
-    else:
-        with pytest.raises(ValueError, match="does not exist"):
+class TestSetCacheDir:
+
+    @pytest.mark.parametrize("create", [True, False])
+    def test_use_env(self, create, mock_fbc_dir):
+        if not create:
+            mock_fbc_dir.rmdir()
+            with pytest.raises(ValueError, match="Cache directory .+ does not exist."):
+                set_cache_dir("/path/to/cache")
+        else:
+            set_cache_dir("/path/to/cache")
+            assert os.environ[ENV_FBC_DIR] == str(mock_fbc_dir)
+
+    @pytest.mark.parametrize("create", [True, False])
+    def test_set_given_dir(self, create, monkeypatch, tmp_path):
+        monkeypatch.delenv(ENV_FBC_DIR)
+        cache_dir = tmp_path / "test-cache_dir"
+        if create:
+            cache_dir.mkdir()
             set_cache_dir(str(cache_dir))
+            assert os.environ[ENV_FBC_DIR] == str(cache_dir)
+        else:
+            with pytest.raises(ValueError, match="Cache directory .+ does not exist."):
+                set_cache_dir(str(cache_dir))
+
+    @pytest.mark.parametrize("dir_path", ["", None])
+    def test_fallback(self, dir_path, monkeypatch):
+        monkeypatch.delenv(ENV_FBC_DIR)
+        set_cache_dir(dir_path)
+        cache_dir = os.environ[ENV_FBC_DIR].rstrip("/")
+        assert os.path.basename(cache_dir).startswith("cache-dir-")
+        assert os.path.exists(cache_dir)
 
 
 class TestGetCache:

@@ -1,9 +1,7 @@
 import argparse
 import logging
-import os
-import tempfile
 
-from pipeline_migration.cache import ENV_FBC_DIR, set_cache_dir
+from pipeline_migration.cache import set_cache_dir
 from pipeline_migration.migrate import migrate
 
 logging.basicConfig(level=logging.DEBUG, format="%(levelname)s:%(asctime)s:%(name)s:%(message)s")
@@ -28,17 +26,7 @@ def main():
     )
 
     args = parser.parse_args()
-
-    cache_dir = args.cache_dir or os.environ.get(ENV_FBC_DIR)
-    if not cache_dir:
-        cache_dir = tempfile.mkdtemp(prefix="cache-dir-")
-        logger.info(
-            "Cache directory is not specified either from command line or by environment "
-            "variable %s, use directory %s instead.",
-            ENV_FBC_DIR,
-            cache_dir,
-        )
-    set_cache_dir(cache_dir)
+    set_cache_dir(args.cache_dir)
 
     migrate(args.renovate_upgrades)
 

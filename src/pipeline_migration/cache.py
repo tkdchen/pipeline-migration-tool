@@ -68,10 +68,27 @@ class FileBasedCache:
 
 
 def set_cache_dir(dir_path: str) -> None:
-    if os.path.exists(dir_path):
-        os.environ[ENV_FBC_DIR] = dir_path
-    else:
-        raise ValueError(f"Directory {dir_path} does not exist.")
+    cache_dir = os.environ.get(ENV_FBC_DIR)
+    if cache_dir:
+        if not os.path.exists(cache_dir):
+            raise ValueError(f"Cache directory {cache_dir} does not exist.")
+        return
+
+    if dir_path:
+        if os.path.exists(dir_path):
+            os.environ[ENV_FBC_DIR] = dir_path
+        else:
+            raise ValueError(f"Cache directory {dir_path} does not exist.")
+        return
+
+    cache_dir = tempfile.mkdtemp(prefix="cache-dir-")
+    logger.info(
+        "Cache directory is not specified either from command line or by environment "
+        "variable %s, use directory %s instead.",
+        ENV_FBC_DIR,
+        cache_dir,
+    )
+    os.environ[ENV_FBC_DIR] = cache_dir
 
 
 def get_cache() -> FileBasedCache:

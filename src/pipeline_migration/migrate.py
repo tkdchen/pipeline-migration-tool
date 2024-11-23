@@ -9,10 +9,11 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Final, Any
 
-from pipeline_migration.utils import FilePath, dump_yaml, load_yaml
+from pipeline_migration.utils import dump_yaml, load_yaml
 from pipeline_migration.registry import Container, Registry, ImageIndex
 from pipeline_migration.quay import QuayTagInfo, list_active_repo_tags
 from pipeline_migration.utils import is_true
+from pipeline_migration.types import FilePath
 
 # TODO: once the build-and-push.sh is done, correct this name if necessary
 MIGRATION_ANNOTATION: Final[str] = "dev.konflux-ci.task.migration"

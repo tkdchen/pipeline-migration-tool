@@ -23,7 +23,6 @@ from pipeline_migration.registry import Container
 from pipeline_migration.types import ManifestT
 from pipeline_migration.utils import load_yaml, dump_yaml
 from tests.utils import generate_digest
-from tests.test_registry import REFERRER_DESCRIPTOR
 
 
 @pytest.fixture(autouse=True)
@@ -548,25 +547,24 @@ class TestFetchMigrationFile:
         assert r is None
 
     @responses.activate
-    def test_no_referrer_with_migration_annotation(self):
+    def test_no_referrer_with_migration_annotation(self, oci_referrer_descriptor):
         c = Container(APP_IMAGE_REPO)
         c.digest = self.image_digest
         bundle_manifest = deepcopy(IMAGE_MANIFEST)
         bundle_manifest["annotations"] = {MIGRATION_ANNOTATION: ANNOTATION_TRUTH_VALUE}
         responses.get(f"https://{c.manifest_url()}", json=bundle_manifest)
 
-        referrer = deepcopy(REFERRER_DESCRIPTOR)
-        referrer["annotations"] = {}
+        oci_referrer_descriptor["annotations"] = {}
         responses.get(
             f"https://{c.referrers_url}?artifactType=text/x-shellscript",
-            json={"schemaVersion": 2, "manifests": [referrer], "annotations": {}},
+            json={"schemaVersion": 2, "manifests": [oci_referrer_descriptor], "annotations": {}},
         )
 
         r = fetch_migration_file(APP_IMAGE_REPO, self.image_digest)
         assert r is None
 
     @responses.activate
-    def test_migration_file_is_fetched(self):
+    def test_migration_file_is_fetched(self, oci_referrer_descriptor):
         c = Container(APP_IMAGE_REPO)
         c.digest = self.image_digest
         bundle_manifest = deepcopy(IMAGE_MANIFEST)
@@ -574,9 +572,12 @@ class TestFetchMigrationFile:
         responses.get(f"https://{c.manifest_url()}", json=bundle_manifest)
 
         # mock there is a referrer with specific artifactType and annotation
-        referrer_descriptor = deepcopy(REFERRER_DESCRIPTOR)
-        referrer_descriptor["annotations"] = {MIGRATION_ANNOTATION: ANNOTATION_TRUTH_VALUE}
-        image_index = {"schemaVersion": 2, "manifests": [referrer_descriptor], "annotations": {}}
+        oci_referrer_descriptor["annotations"] = {MIGRATION_ANNOTATION: ANNOTATION_TRUTH_VALUE}
+        image_index = {
+            "schemaVersion": 2,
+            "manifests": [oci_referrer_descriptor],
+            "annotations": {},
+        }
         responses.get(
             f"https://{c.referrers_url}?artifactType=text/x-shellscript", json=image_index
         )
@@ -586,7 +587,7 @@ class TestFetchMigrationFile:
         # mock getting referrer image manifest
         referrer_manifest = deepcopy(IMAGE_MANIFEST)
         referrer_manifest["layers"][0]["digest"] = layer_digest
-        c.digest = referrer_descriptor["digest"]
+        c.digest = oci_referrer_descriptor["digest"]
         responses.get(f"https://{c.manifest_url()}", json=referrer_manifest)
 
         # mock getting referrer's layer blob, i.e. the content

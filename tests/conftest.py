@@ -1,7 +1,7 @@
 import pytest
 
 from pipeline_migration.cache import ENV_FBC_DIR
-from pipeline_migration.types import ManifestT
+from pipeline_migration.types import DescriptorT, ManifestT
 
 
 @pytest.fixture(autouse=True)
@@ -32,3 +32,19 @@ def image_manifest() -> ManifestT:
         ],
         "annotations": {},
     }
+
+
+@pytest.fixture
+def oci_image_descriptor() -> DescriptorT:
+    return {
+        "mediaType": "image.manifest",
+        "digest": "sha256:498ce84ac04c70f2bce9630eec216a33f8ab0f345702a830826548f773e351ef",
+        "size": 100,
+        "annotations": {},
+    }
+
+
+@pytest.fixture
+def oci_referrer_descriptor(oci_image_descriptor) -> DescriptorT:
+    oci_image_descriptor["artifactType"] = "text/plain"
+    return oci_image_descriptor

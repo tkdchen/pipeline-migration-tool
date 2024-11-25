@@ -9,7 +9,15 @@ from oras.types import container_type
 from pipeline_migration.cache import ENV_FBC_DIR
 from pipeline_migration.cli import entry_point
 from pipeline_migration.migrate import MIGRATION_ANNOTATION
-from pipeline_migration.registry import Container, Registry, ensure_container
+from pipeline_migration.registry import (
+    Container,
+    MEDIA_TYPE_OCI_EMTPY_V1,
+    MEDIA_TYPE_OCI_IMAGE_CONFIG_V1,
+    MEDIA_TYPE_OCI_IMAGE_INDEX_V1,
+    MEDIA_TYPE_OCI_IMAGE_MANIFEST_V1,
+    Registry,
+    ensure_container,
+)
 
 from tests.test_migrate import PIPELINE_DEFINITION, TASK_BUNDLE_CLONE
 from tests.utils import generate_digest, generate_git_sha
@@ -48,9 +56,9 @@ task_bundle_clone_test_data = ImageTestData(
         # Task bundles, which are listed from newer one to older one.
         "sha256:c4bb69a3a08f": {
             "schemaVersion": 2,
-            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "mediaType": MEDIA_TYPE_OCI_IMAGE_MANIFEST_V1,
             "config": {
-                "mediaType": "application/vnd.oci.image.config.v1+json",
+                "mediaType": MEDIA_TYPE_OCI_IMAGE_CONFIG_V1,
                 "digest": generate_digest(),
                 "size": 10,
             },
@@ -59,9 +67,9 @@ task_bundle_clone_test_data = ImageTestData(
         },
         "sha256:f23dc7cd74ba": {
             "schemaVersion": 2,
-            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "mediaType": MEDIA_TYPE_OCI_IMAGE_MANIFEST_V1,
             "config": {
-                "mediaType": "application/vnd.oci.image.config.v1+json",
+                "mediaType": MEDIA_TYPE_OCI_IMAGE_CONFIG_V1,
                 "digest": generate_digest(),
                 "size": 11,
             },
@@ -70,9 +78,9 @@ task_bundle_clone_test_data = ImageTestData(
         },
         "sha256:492fb9ae4e7e": {
             "schemaVersion": 2,
-            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "mediaType": MEDIA_TYPE_OCI_IMAGE_MANIFEST_V1,
             "config": {
-                "mediaType": "application/vnd.oci.image.config.v1+json",
+                "mediaType": MEDIA_TYPE_OCI_IMAGE_CONFIG_V1,
                 "digest": generate_digest(),
                 "size": 12,
             },
@@ -82,9 +90,9 @@ task_bundle_clone_test_data = ImageTestData(
         # Artifacts
         "sha256:524f99ec6cde": {
             "schemaVersion": 2,
-            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "mediaType": MEDIA_TYPE_OCI_IMAGE_MANIFEST_V1,
             "config": {
-                "mediaType": "application/vnd.oci.empty.v1+json",
+                "mediaType": MEDIA_TYPE_OCI_EMTPY_V1,
                 "digest": "sha256:44136fa",
                 "size": 2,
             },
@@ -98,9 +106,9 @@ task_bundle_clone_test_data = ImageTestData(
         },
         "sha256:3ee08ef47114": {
             "schemaVersion": 2,
-            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "mediaType": MEDIA_TYPE_OCI_IMAGE_MANIFEST_V1,
             "config": {
-                "mediaType": "application/vnd.oci.empty.v1+json",
+                "mediaType": MEDIA_TYPE_OCI_EMTPY_V1,
                 "digest": "sha256:44136ff",
                 "size": 2,
             },
@@ -116,17 +124,17 @@ task_bundle_clone_test_data = ImageTestData(
     referrers={
         "sha256:c4bb69a3a08f": {
             "schemaVersion": 2,
-            "mediaType": "application/vnd.oci.image.index.v1+json",
+            "mediaType": MEDIA_TYPE_OCI_IMAGE_INDEX_V1,
             "manifests": [
                 {
-                    "mediaType": "application/vnd.oci.image.manifest.v1+json",
+                    "mediaType": MEDIA_TYPE_OCI_IMAGE_MANIFEST_V1,
                     "digest": "sha256:123",
                     "size": 1409,
                     "artifactType": "application/pdf",
                     "annotations": {},
                 },
                 {
-                    "mediaType": "application/vnd.oci.image.manifest.v1+json",
+                    "mediaType": MEDIA_TYPE_OCI_IMAGE_MANIFEST_V1,
                     "digest": "sha256:524f99ec6cde",
                     "size": 300,
                     "artifactType": "text/x-shellscript",
@@ -138,10 +146,10 @@ task_bundle_clone_test_data = ImageTestData(
         },
         "sha256:f23dc7cd74ba": {
             "schemaVersion": 2,
-            "mediaType": "application/vnd.oci.image.index.v1+json",
+            "mediaType": MEDIA_TYPE_OCI_IMAGE_INDEX_V1,
             "manifests": [
                 {
-                    "mediaType": "application/vnd.oci.image.manifest.v1+json",
+                    "mediaType": MEDIA_TYPE_OCI_IMAGE_MANIFEST_V1,
                     "digest": "sha256:3ee08ef47114",
                     "size": 2048,
                     "artifactType": "text/x-shellscript",
@@ -202,8 +210,7 @@ class TestMigrateSingleTaskBundleUpgrade:
             tags = [
                 {"name": f"0.1-{generate_git_sha()}", "manifest_digest": digest}
                 for digest, manifest_json in image_data.manifests.items()
-                if manifest_json["config"]["mediaType"]
-                == "application/vnd.oci.image.config.v1+json"
+                if manifest_json["config"]["mediaType"] == MEDIA_TYPE_OCI_IMAGE_CONFIG_V1
             ]
             c = Container(image_data.image)
             api_url = f"https://quay.io/api/v1/repository/{c.api_prefix}/tag/"

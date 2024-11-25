@@ -4,7 +4,14 @@ import pytest
 import responses
 
 from tests.utils import generate_digest
-from pipeline_migration.registry import Container, Descriptor, ImageIndex, Registry
+from pipeline_migration.registry import (
+    Container,
+    Descriptor,
+    ImageIndex,
+    MEDIA_TYPE_OCI_IMAGE_INDEX_V1,
+    MEDIA_TYPE_OCI_IMAGE_MANIFEST_V1,
+    Registry,
+)
 from pipeline_migration.types import DescriptorT, ImageIndexT
 
 
@@ -26,7 +33,7 @@ def test_container_uri_with_tag(tag):
 
 
 REFERRER_DESCRIPTOR: DescriptorT = {
-    "mediaType": "image.manifest",
+    "mediaType": MEDIA_TYPE_OCI_IMAGE_MANIFEST_V1,
     "digest": "sha256:1234567",
     "size": 100,
     "artifactType": "text/plain",
@@ -36,7 +43,7 @@ REFERRER_DESCRIPTOR: DescriptorT = {
 
 IMAGE_INDEX: ImageIndexT = {
     "schemaVersion": 2,
-    "mediaType": "application/vnd.oci.image.index.v1+json",
+    "mediaType": MEDIA_TYPE_OCI_IMAGE_INDEX_V1,
     "manifests": [],
     "annotations": {},
 }
@@ -59,7 +66,7 @@ class TestDescriptor:
 def test_image_index_get_manifest():
     index_json: ImageIndexT = {
         "schemaVersion": 2,
-        "mediaType": "index",
+        "mediaType": MEDIA_TYPE_OCI_IMAGE_INDEX_V1,
         "manifests": [REFERRER_DESCRIPTOR.copy()],
         "annotations": {},
     }

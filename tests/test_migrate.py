@@ -19,13 +19,7 @@ from pipeline_migration.migrate import (
     TaskBundleUpgradesManager,
 )
 from pipeline_migration.quay import QuayTagInfo
-from pipeline_migration.registry import (
-    MEDIA_TYPE_OCI_IMAGE_CONFIG_V1,
-    MEDIA_TYPE_OCI_IMAGE_LAYER_V1_TAR_GZ,
-    MEDIA_TYPE_OCI_IMAGE_MANIFEST_V1,
-    Container,
-)
-from pipeline_migration.types import ManifestT
+from pipeline_migration.registry import Container
 from pipeline_migration.utils import load_yaml, dump_yaml
 from tests.utils import generate_digest
 
@@ -494,26 +488,6 @@ class TestTaskBundleUpgradesManagerCollectUpgrades:
         assert len(package_files) > len(manager._package_file_updates)
 
 
-# TODO: use the image_manifest fixture instead
-IMAGE_MANIFEST: ManifestT = {
-    "schemaVersion": 2,
-    "mediaType": MEDIA_TYPE_OCI_IMAGE_MANIFEST_V1,
-    "config": {
-        "mediaType": MEDIA_TYPE_OCI_IMAGE_CONFIG_V1,
-        "digest": "sha256:070f25377bd2436ae765bfcc36cd47e9e153cd479d1c0fa147929dd2e1fe21f8",
-        "size": 100,
-    },
-    "layers": [
-        {
-            "mediaType": MEDIA_TYPE_OCI_IMAGE_LAYER_V1_TAR_GZ,
-            "digest": "sha256:498ce84ac04c70f2bce9630eec216a33f8ab0f345702a830826548f773e351ec",
-            "size": 200,
-        },
-    ],
-    "annotations": {},
-}
-
-
 class TestFetchMigrationFile:
 
     def setup_method(self, method):
@@ -524,23 +498,21 @@ class TestFetchMigrationFile:
             fetch_migration_file(f"{APP_IMAGE_REPO}@{self.image_digest}", self.image_digest)
 
     @responses.activate
-    def test_task_bundle_has_no_migration_annotation(self):
+    def test_task_bundle_has_no_migration_annotation(self, image_manifest):
         c = Container(APP_IMAGE_REPO)
         c.digest = self.image_digest
-        bundle_manifest = deepcopy(IMAGE_MANIFEST)
-        bundle_manifest["annotations"] = {}  # clear explicitly
-        responses.get(f"https://{c.manifest_url()}", json=bundle_manifest)
+        image_manifest["annotations"] = {}  # clear explicitly
+        responses.get(f"https://{c.manifest_url()}", json=image_manifest)
 
         r = fetch_migration_file(APP_IMAGE_REPO, self.image_digest)
         assert r is None
 
     @responses.activate
-    def test_no_referrer_with_expected_artifact_type(self):
+    def test_no_referrer_with_expected_artifact_type(self, image_manifest):
         c = Container(APP_IMAGE_REPO)
         c.digest = self.image_digest
-        bundle_manifest = deepcopy(IMAGE_MANIFEST)
-        bundle_manifest["annotations"] = {MIGRATION_ANNOTATION: ANNOTATION_TRUTH_VALUE}
-        responses.get(f"https://{c.manifest_url()}", json=bundle_manifest)
+        image_manifest["annotations"] = {MIGRATION_ANNOTATION: ANNOTATION_TRUTH_VALUE}
+        responses.get(f"https://{c.manifest_url()}", json=image_manifest)
 
         referrers = []  # No referrer
         responses.get(
@@ -552,12 +524,11 @@ class TestFetchMigrationFile:
         assert r is None
 
     @responses.activate
-    def test_no_referrer_with_migration_annotation(self, oci_referrer_descriptor):
+    def test_no_referrer_with_migration_annotation(self, oci_referrer_descriptor, image_manifest):
         c = Container(APP_IMAGE_REPO)
         c.digest = self.image_digest
-        bundle_manifest = deepcopy(IMAGE_MANIFEST)
-        bundle_manifest["annotations"] = {MIGRATION_ANNOTATION: ANNOTATION_TRUTH_VALUE}
-        responses.get(f"https://{c.manifest_url()}", json=bundle_manifest)
+        image_manifest["annotations"] = {MIGRATION_ANNOTATION: ANNOTATION_TRUTH_VALUE}
+        responses.get(f"https://{c.manifest_url()}", json=image_manifest)
 
         oci_referrer_descriptor["annotations"] = {}
         responses.get(
@@ -569,10 +540,10 @@ class TestFetchMigrationFile:
         assert r is None
 
     @responses.activate
-    def test_migration_file_is_fetched(self, oci_referrer_descriptor):
+    def test_migration_file_is_fetched(self, oci_referrer_descriptor, image_manifest):
         c = Container(APP_IMAGE_REPO)
         c.digest = self.image_digest
-        bundle_manifest = deepcopy(IMAGE_MANIFEST)
+        bundle_manifest = deepcopy(image_manifest)
         bundle_manifest["annotations"] = {MIGRATION_ANNOTATION: ANNOTATION_TRUTH_VALUE}
         responses.get(f"https://{c.manifest_url()}", json=bundle_manifest)
 
@@ -590,7 +561,7 @@ class TestFetchMigrationFile:
         layer_digest: Final = generate_digest()
 
         # mock getting referrer image manifest
-        referrer_manifest = deepcopy(IMAGE_MANIFEST)
+        referrer_manifest = deepcopy(image_manifest)
         referrer_manifest["layers"][0]["digest"] = layer_digest
         c.digest = oci_referrer_descriptor["digest"]
         responses.get(f"https://{c.manifest_url()}", json=referrer_manifest)

@@ -19,7 +19,7 @@ from pipeline_migration.registry import (
     ensure_container,
 )
 
-from tests.test_migrate import PIPELINE_DEFINITION, TASK_BUNDLE_CLONE
+from tests.test_migrate import APP_IMAGE_REPO, PIPELINE_DEFINITION, TASK_BUNDLE_CLONE
 from tests.utils import generate_digest, generate_git_sha
 
 
@@ -240,6 +240,16 @@ class TestMigrateSingleTaskBundleUpgrade:
                 "currentDigest": "sha256:492fb9ae4e7e",
                 "newValue": "0.1",
                 "newDigest": "sha256:c4bb69a3a08f",
+                "depTypes": ["tekton-bundle"],
+                "packageFile": str(pipeline_file.relative_to(tmp_path)),
+                "parentDir": pipeline_file.parent.name,
+            },
+            {
+                "depName": APP_IMAGE_REPO,
+                "currentValue": "0.2",
+                "currentDigest": generate_digest(),
+                "newValue": "0.7",
+                "newDigest": generate_digest(),
                 "depTypes": ["tekton-bundle"],
                 "packageFile": str(pipeline_file.relative_to(tmp_path)),
                 "parentDir": pipeline_file.parent.name,

@@ -718,9 +718,9 @@ class TestApplyMigrations:
         def subprocess_run(*args, **kwargs):
             cmd = args[0]
             assert cmd[:2] == ["bash", "-e"]
-            with open(cmd[2], "r") as f:
+            with open(cmd[-1], "r") as f:
                 assert f.read() == PIPELINE_DEFINITION
-            with open(cmd[3], "r") as f:
+            with open(cmd[-2], "r") as f:
                 assert f.read() == migration_script
             assert kwargs.get("check")
             test_context["bash_run"] = True
@@ -799,7 +799,7 @@ class TestApplyMigrations:
 
         def subprocess_run(*args, **kwargs):
             cmd = args[0]
-            with open(cmd[3], "r") as f:
+            with open(cmd[-2], "r") as f:
                 test_context["executed_scripts"].append(f.read())
 
         monkeypatch.setattr("tempfile.mkstemp", _mkstemp)

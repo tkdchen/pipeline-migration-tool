@@ -1,4 +1,5 @@
 import argparse
+import json
 import logging
 
 from pipeline_migration.cache import set_cache_dir
@@ -28,7 +29,8 @@ def main():
     args = parser.parse_args()
     set_cache_dir(args.cache_dir)
 
-    migrate(args.renovate_upgrades)
+    upgrades = json.loads(args.renovate_upgrades)
+    migrate(upgrades)
 
 
 def entry_point():

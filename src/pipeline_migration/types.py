@@ -27,4 +27,4 @@ class ManifestT(TypedDict):
     mediaType: str
     config: DescriptorT
     layers: list[DescriptorT]
-    annotations: AnnotationsT
+    annotations: NotRequired[AnnotationsT]

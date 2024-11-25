@@ -291,7 +291,7 @@ class TaskBundleUpgradesManager:
         with resolve_pipeline(pipeline_file) as file_path:
             logger.info("Executing migration script %s on %s", migration_file, file_path)
             try:
-                subprocess.run(["bash", "-e", file_path, migration_file], check=True)
+                subprocess.run(["bash", "-e", migration_file, file_path], check=True)
             finally:
                 os.unlink(migration_file)
 

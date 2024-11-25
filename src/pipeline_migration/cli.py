@@ -19,12 +19,7 @@ def main():
         metavar="JSON_STR",
         help="A JSON string converted from Renovate template field upgrades.",
     )
-    parser.add_argument(
-        "-d",
-        "--cache-dir",
-        metavar="PATH",
-        help="Path to the cache directory.",
-    )
+    parser.add_argument("-d", "--cache-dir", metavar="PATH", help="Path to the cache directory.")
 
     args = parser.parse_args()
     set_cache_dir(args.cache_dir)
@@ -37,4 +32,4 @@ def entry_point():
     try:
         return main()
     except Exception as e:
-        logger.error("Cannot do migration for pipeline. Reason: %r", e)
+        logger.exception("Cannot do migration for pipeline. Reason: %r", e)

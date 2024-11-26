@@ -2,8 +2,10 @@ import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Final
 
 import responses
+import pytest
 from oras.types import container_type
 
 from pipeline_migration.cache import ENV_FBC_DIR
@@ -23,20 +25,34 @@ from tests.test_migrate import APP_IMAGE_REPO, PIPELINE_DEFINITION, TASK_BUNDLE_
 from tests.utils import generate_digest, generate_git_sha
 
 
+UPGRADES: Final = [
+    {
+        "depName": TASK_BUNDLE_CLONE,
+        "currentValue": "0.1",
+        "currentDigest": generate_digest(),
+        "newValue": "0.1",
+        "newDigest": generate_digest(),
+        "depTypes": ["tekton-bundle"],
+        "packageFile": ".tekton/component-a-pr.yaml",
+        "parentDir": ".tekton",
+    },
+]
+
+
 class TestSetFBCDir:
 
     def test_set_from_command_line(self, monkeypatch, tmp_path):
         monkeypatch.delenv(ENV_FBC_DIR)
-        monkeypatch.setattr("sys.argv", ["mt", "-u", "{}", "-d", str(tmp_path)])
-        monkeypatch.setattr("pipeline_migration.migrate.migrate", lambda: 1)
-        entry_point()
+        monkeypatch.setattr("sys.argv", ["mt", "-u", json.dumps(UPGRADES), "-d", str(tmp_path)])
+        monkeypatch.setattr("pipeline_migration.cli.migrate", lambda arg: 1)
+        assert entry_point() is None
         assert os.environ[ENV_FBC_DIR] == str(tmp_path)
 
     def test_fallback_to_a_temporary_dir(self, monkeypatch):
         monkeypatch.delenv(ENV_FBC_DIR)
-        monkeypatch.setattr("sys.argv", ["mt", "-u", "{}"])
-        monkeypatch.setattr("pipeline_migration.migrate.migrate", lambda: 1)
-        entry_point()
+        monkeypatch.setattr("sys.argv", ["mt", "-u", json.dumps(UPGRADES)])
+        monkeypatch.setattr("pipeline_migration.cli.migrate", lambda arg: 1)
+        assert entry_point() is None
         cache_dir = os.environ[ENV_FBC_DIR]
         assert os.path.isdir(cache_dir)
         assert os.path.basename(cache_dir.rstrip("/")).startswith("cache-dir-")
@@ -277,12 +293,63 @@ class TestMigrateSingleTaskBundleUpgrade:
 
         monkeypatch.setattr("subprocess.run", _subprocess_run)
 
-        entry_point()
+        assert entry_point() is None
 
 
 def test_entry_point_should_catch_error(monkeypatch, caplog):
-    cli_cmd = ["pmt", "-u", '{"depName": "ns/app"}']
+    cli_cmd = ["pmt", "-u", json.dumps(UPGRADES)]
     monkeypatch.setattr("sys.argv", cli_cmd)
-    entry_point()
+    assert entry_point() == 1
     assert "Cannot do migration for pipeline." in caplog.text
     assert "Traceback (most recent call last)" in caplog.text
+
+
+@pytest.mark.parametrize(
+    "upgrades,expected_err_msgs",
+    [
+        ["renovate upgrades which is not a encoded JSON string", ["Expecting value:"]],
+        ["{}", ["does not pass schema validation:"]],
+        ["[{}]", ["does not pass schema validation:"]],
+        [f'[{{"depName": "{TASK_BUNDLE_CLONE}"}}]', ["does not pass schema validation:"]],
+        [
+            json.dumps(
+                [
+                    {
+                        "depName": TASK_BUNDLE_CLONE,
+                        "currentValue": "0.1",
+                        "currentDigest": "sha256:digest",  # invalid
+                        "newValue": "0.1",
+                        "newDigest": generate_digest(),
+                        "depTypes": ["tekton-bundle"],
+                        "packageFile": "path/to/pipeline-run.yaml",
+                        "parentDir": "path/to",
+                    },
+                ],
+            ),
+            ["does not pass schema validation:"],
+        ],
+        [
+            json.dumps(
+                [
+                    {
+                        "depName": TASK_BUNDLE_CLONE,
+                        "currentValue": "0.1",
+                        "currentDigest": generate_digest(),
+                        "newValue": "0.1",
+                        "newDigest": "sha256:digest",  # invalid
+                        "depTypes": ["tekton-bundle"],
+                        "packageFile": "path/to/pipeline-run.yaml",
+                        "parentDir": "path/to",
+                    },
+                ],
+            ),
+            ["does not pass schema validation:"],
+        ],
+    ],
+)
+def test_cli_stops_if_input_upgrades_is_invalid(upgrades, expected_err_msgs, monkeypatch, caplog):
+    cli_cmd = ["pmt", "-u", upgrades]
+    monkeypatch.setattr("sys.argv", cli_cmd)
+    assert entry_point() == 1
+    for err_msg in expected_err_msgs:
+        assert err_msg in caplog.text

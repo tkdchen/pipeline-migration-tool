@@ -199,26 +199,19 @@ class TaskBundleUpgradesManager:
 
     def _collect(self, upgrades: list[dict[str, Any]]) -> None:
         for upgrade in upgrades:
-            try:
-                task_bundle_upgrade = TaskBundleUpgrade(
-                    dep_name=upgrade["depName"],
-                    current_value=upgrade["currentValue"],
-                    current_digest=upgrade["currentDigest"],
-                    new_value=upgrade["newValue"],
-                    new_digest=upgrade["newDigest"],
-                )
-                package_file = PackageFile(
-                    file_path=upgrade["packageFile"],
-                    parent_dir=upgrade["parentDir"],
-                )
-            except KeyError as e:
-                field_name = str(e).replace("'", "")
-                raise InvalidRenovateUpgradesData(f"Missing field {field_name} in upgrades data.")
+            task_bundle_upgrade = TaskBundleUpgrade(
+                dep_name=upgrade["depName"],
+                current_value=upgrade["currentValue"],
+                current_digest=upgrade["currentDigest"],
+                new_value=upgrade["newValue"],
+                new_digest=upgrade["newDigest"],
+            )
+            package_file = PackageFile(
+                file_path=upgrade["packageFile"],
+                parent_dir=upgrade["parentDir"],
+            )
 
-            dep_types = upgrade.get("depTypes")
-            if dep_types is None:
-                raise InvalidRenovateUpgradesData("depTypes is missing")
-            if "tekton-bundle" not in dep_types:
+            if "tekton-bundle" not in upgrade["depTypes"]:
                 logger.debug(
                     "Dependency %s is not handled by tekton-bundle manager.",
                     task_bundle_upgrade.dep_name,

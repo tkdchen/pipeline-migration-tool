@@ -446,11 +446,6 @@ class TestTaskBundleUpgradesManagerCollectUpgrades:
         manager = TaskBundleUpgradesManager(self.test_upgrades)
         assert len(manager._task_bundle_upgrades) == 3
 
-    def test_raise_error_if_missing_field(self):
-        del self.test_upgrades[-1]["currentValue"]
-        with pytest.raises(InvalidRenovateUpgradesData, match="Missing field currentValue"):
-            TaskBundleUpgradesManager(self.test_upgrades)
-
     def test_skip_non_konflux_bundles(self):
         """
         Modify a task bundle for push package file, then check the number of collected upgrades,
@@ -471,12 +466,6 @@ class TestTaskBundleUpgradesManagerCollectUpgrades:
             if package_file.file_path.endswith("push.yaml")
         ]
         assert len(package_files[0].task_bundle_upgrades) == 1
-
-    def test_missing_dep_types(self):
-        for upgrade in self.test_upgrades:
-            del upgrade["depTypes"]
-        with pytest.raises(InvalidRenovateUpgradesData, match="depTypes is missing"):
-            TaskBundleUpgradesManager(self.test_upgrades)
 
     def test_do_not_include_upgrade_by_tekton_bundle_manager(self):
         for upgrade in self.test_upgrades:

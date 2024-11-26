@@ -1,3 +1,7 @@
+import os
+import shutil
+import tempfile
+
 import pytest
 
 from pipeline_migration.cache import ENV_FBC_DIR
@@ -7,6 +11,21 @@ from pipeline_migration.registry import (
     MEDIA_TYPE_OCI_IMAGE_LAYER_V1_TAR_GZ,
     MEDIA_TYPE_OCI_IMAGE_MANIFEST_V1,
 )
+
+
+@pytest.fixture(autouse=True)
+def remove_cache_dir(caplog, request):
+    """
+    Apply globally to remove the cache directory created in the set_cache_dir method during tests
+    """
+
+    def _remove_existing_cache_dir():
+        tmp_dir = tempfile.gettempdir()
+        for name in os.listdir(tmp_dir):
+            if name.startswith("cache-dir-"):
+                shutil.rmtree(os.path.join(tmp_dir, name))
+
+    request.addfinalizer(_remove_existing_cache_dir)
 
 
 @pytest.fixture(autouse=True)

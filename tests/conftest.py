@@ -4,7 +4,7 @@ import tempfile
 
 import pytest
 
-from pipeline_migration.cache import ENV_FBC_DIR
+from pipeline_migration.cache import ENV_FBC_DIR, FBC_DIR_PREFIX
 from pipeline_migration.types import DescriptorT, ManifestT
 from pipeline_migration.registry import (
     MEDIA_TYPE_OCI_IMAGE_CONFIG_V1,
@@ -22,7 +22,7 @@ def remove_cache_dir(caplog, request):
     def _remove_existing_cache_dir():
         tmp_dir = tempfile.gettempdir()
         for name in os.listdir(tmp_dir):
-            if name.startswith("cache-dir-"):
+            if name.startswith(FBC_DIR_PREFIX):
                 shutil.rmtree(os.path.join(tmp_dir, name))
 
     request.addfinalizer(_remove_existing_cache_dir)

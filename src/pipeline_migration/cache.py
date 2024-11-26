@@ -10,6 +10,7 @@ from pipeline_migration.utils import is_true
 logger = logging.getLogger("cache")
 
 ENV_FBC_DIR: Final = "FILE_BASED_CACHE_DIR"
+FBC_DIR_PREFIX: Final = "pmt-fbc-dir-"
 
 
 class FileBasedCache:
@@ -81,7 +82,7 @@ def set_cache_dir(dir_path: str) -> None:
             raise ValueError(f"Cache directory {dir_path} does not exist.")
         return
 
-    cache_dir = tempfile.mkdtemp(prefix="cache-dir-")
+    cache_dir = tempfile.mkdtemp(prefix=FBC_DIR_PREFIX)
     logger.info(
         "Cache directory is not specified either from command line or by environment "
         "variable %s, use directory %s instead.",

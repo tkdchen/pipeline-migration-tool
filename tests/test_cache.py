@@ -2,7 +2,13 @@ import os
 import pytest
 import tempfile
 
-from pipeline_migration.cache import ENV_FBC_DIR, FileBasedCache, get_cache, set_cache_dir
+from pipeline_migration.cache import (
+    ENV_FBC_DIR,
+    FBC_DIR_PREFIX,
+    FileBasedCache,
+    get_cache,
+    set_cache_dir,
+)
 from tests.utils import generate_digest
 
 
@@ -95,7 +101,7 @@ class TestSetCacheDir:
         monkeypatch.delenv(ENV_FBC_DIR)
         set_cache_dir(dir_path)
         cache_dir = os.environ[ENV_FBC_DIR].rstrip("/")
-        assert os.path.basename(cache_dir).startswith("cache-dir-")
+        assert os.path.basename(cache_dir).startswith(FBC_DIR_PREFIX)
         assert os.path.exists(cache_dir)
 
 

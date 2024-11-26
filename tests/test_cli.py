@@ -8,7 +8,7 @@ import responses
 import pytest
 from oras.types import container_type
 
-from pipeline_migration.cache import ENV_FBC_DIR
+from pipeline_migration.cache import ENV_FBC_DIR, FBC_DIR_PREFIX
 from pipeline_migration.cli import entry_point
 from pipeline_migration.migrate import MIGRATION_ANNOTATION
 from pipeline_migration.registry import (
@@ -55,7 +55,7 @@ class TestSetFBCDir:
         assert entry_point() is None
         cache_dir = os.environ[ENV_FBC_DIR]
         assert os.path.isdir(cache_dir)
-        assert os.path.basename(cache_dir.rstrip("/")).startswith("cache-dir-")
+        assert os.path.basename(cache_dir.rstrip("/")).startswith(FBC_DIR_PREFIX)
 
 
 @dataclass

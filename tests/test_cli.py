@@ -278,3 +278,11 @@ class TestMigrateSingleTaskBundleUpgrade:
         monkeypatch.setattr("subprocess.run", _subprocess_run)
 
         entry_point()
+
+
+def test_entry_point_should_catch_error(monkeypatch, caplog):
+    cli_cmd = ["pmt", "-u", '{"depName": "ns/app"}']
+    monkeypatch.setattr("sys.argv", cli_cmd)
+    entry_point()
+    assert "Cannot do migration for pipeline." in caplog.text
+    assert "Traceback (most recent call last)" in caplog.text

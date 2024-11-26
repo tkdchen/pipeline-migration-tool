@@ -1,0 +1,24 @@
+allowed_users:
+  - tisutisu
+  - chmeliik
+  - mkosiarc
+  - mmorhun
+  - rcerven
+  - tkdchen
+  - tnevrlka
+approvers:
+  - tisutisu
+  - chmeliik
+  - mkosiarc
+  - mmorhun
+  - rcerven
+  - tkdchen
+  - tnevrlka
+reviewers:
+  - tisutisu
+  - chmeliik
+  - mkosiarc
+  - mmorhun
+  - rcerven
+  - tkdchen
+  - tnevrlka

@@ -4,7 +4,12 @@ A migration tool does migrations for Konflux pipelines.
 
 ## Run tests
 
-`tox`
+```bash
+python3 -m venv venv
+source ./venv/bin/activate
+python3 -m pip install -r requirements-test.txt
+tox
+```
 
 ## License
 

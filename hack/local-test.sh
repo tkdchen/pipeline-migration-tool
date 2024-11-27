@@ -122,7 +122,7 @@ make_renovate_upgrades() {
 
     local -r data_file="/tmp/pmt-upgrades-data.txt"
 
-    echo -n "[" | tee -a "$data_file"
+    echo -n "[" | tee "$data_file"
 
     upgrade_from=${clone_upgrades_data[0]}
     dep_name=$(cut -d' ' -f1 <<<"$upgrade_from")

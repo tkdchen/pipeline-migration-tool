@@ -43,9 +43,9 @@ SAMPLE_TAGS_OF_NS_APP: Final = [
 ]
 
 APP_IMAGE_REPO: Final = "reg.io/ns/app"
-TASK_BUNDLE_CLONE: Final = "quay.io/konflux-ci/task-clone"
-TASK_BUNDLE_TESTS: Final = "quay.io/konflux-ci/task-tests"
-TASK_BUNDLE_LINT: Final = "quay.io/konflux-ci/task-lint"
+TASK_BUNDLE_CLONE: Final = "quay.io/konflux-ci/catalog/task-clone"
+TASK_BUNDLE_TESTS: Final = "quay.io/konflux-ci/catalog/task-tests"
+TASK_BUNDLE_LINT: Final = "quay.io/konflux-ci/catalog/task-lint"
 
 
 class TestDetermineTaskBundleUpdatesRange:

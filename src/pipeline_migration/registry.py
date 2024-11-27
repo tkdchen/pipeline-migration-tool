@@ -68,11 +68,18 @@ class Registry(OrasRegistry):
         super().__init__(*args, **kwargs)
         self._cache = get_cache()
 
+    @staticmethod
+    def _container_key(c: Container, digest: str | None = None) -> str:
+        d = digest or c.digest
+        # oras-py parses the image by making the extra path components of repo
+        # name be part of the namespace.
+        return f"{c.namespace.replace('/', '_')}-{c.repository}-{d}"
+
     @ensure_container
     def get_manifest(
         self, container: container_type, allowed_media_type: list | None = None
     ) -> dict:
-        key = f"manifest-{container.namespace}-{container.repository}-{container.digest}"
+        key = f"manifest-{self._container_key(container)}"
         if (v := self._cache.get(key)) is None:
             manifest = super().get_manifest(container, allowed_media_type)
             self._cache.set(key, json.dumps(manifest))
@@ -82,7 +89,7 @@ class Registry(OrasRegistry):
 
     @ensure_container
     def get_artifact(self, container: container_type, digest: str) -> str:
-        key = f"blob-{container.namespace}-{container.repository}-{digest}"
+        key = f"blob-{self._container_key(container, digest)}"
         if (v := self._cache.get(key)) is None:
             resp = self.get_blob(container, digest)
             v = resp.content.decode("utf-8")
@@ -114,7 +121,7 @@ class Registry(OrasRegistry):
     def list_referrers(
         self, container: container_type, artifact_type: str | None = None
     ) -> ImageIndexT:
-        key = f"referrers-{container.namespace}-{container.repository}-{container.digest}"
+        key = f"referrers-{self._container_key(container)}"
         if (v := self._cache.get(key)) is None:
             image_index = self._list_referrers(container, artifact_type)
             self._cache.set(key, json.dumps(image_index))

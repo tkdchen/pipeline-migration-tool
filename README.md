@@ -11,6 +11,24 @@ python3 -m pip install -r requirements-test.txt
 tox
 ```
 
+## Local test by running the migration tool
+
+```bash
+source ./venv/bin/activate
+python3 -m pip install -e .
+
+# build and push sample task bundles
+bash ./hack/local-test.sh build-and-push
+
+# Sample Renovate upgrades data is written into file /tmp/pmt-upgrades-data.txt
+
+# Run the migration tool
+pipeline-migration-tool -u "$(cat /tmp/pmt-upgrades-data.txt)"
+
+# If needed, run command to remove all task bundles from registry
+bash ./hack/local-test.sh remove-task-bundles
+```
+
 ## License
 
 Copyright 2024.

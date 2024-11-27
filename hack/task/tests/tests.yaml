@@ -1,0 +1,25 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: tests
+  labels:
+    app.kubernetes.io/version: "0.1"
+    build.appstudio.redhat.com/build_type: "docker"
+  annotations:
+    tekton.dev/pipelines.minVersion: "0.12.1"
+spec:
+  params:
+    - name: url
+      description: Repository URL to clone from.
+      type: string
+    - name: revision
+      description: Revision to checkout.
+      type: string
+      default: main
+  steps:
+    - name: run-tests
+      image: registry.fedoraproject.org/fedora-minimal:40
+      script: |
+        echo run various tests
+  workspaces:
+    - name: source

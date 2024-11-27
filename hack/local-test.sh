@@ -54,64 +54,64 @@ build_and_push() {
     local -a task_versions=()
 
     if [[ "$task_name" == "clone" ]]; then
-	task_versions+=(0.1.0 0.2.0 0.2.1 0.2.4 0.3.0 0.4.0)
+      task_versions+=(0.1.0 0.2.0 0.2.1 0.2.4 0.3.0 0.4.0)
     elif [[ "$task_name" == "tests" ]]; then
-	task_versions+=(0.1.0 0.2.0 0.2.1 0.3.0 0.3.2)
+      task_versions+=(0.1.0 0.2.0 0.2.1 0.3.0 0.3.2)
     else
-	echo "error: script does not work for task name $task_name" >&2
-	return 1
+      echo "error: script does not work for task name $task_name" >&2
+      return 1
     fi
 
     for task_version in "${task_versions[@]}"
     do
-	modified_task_file="/tmp/${task_file##*/}-modified"
-	yq ".metadata.labels.\"app.kubernetes.io/version\" |= \"${task_version}\"" "$task_file" >"$modified_task_file"
-	annotations=()
-	migration_file="hack/task/${task_name}/migrations/${task_version}.sh"
-	if [[ -e "$migration_file" ]]; then
-	    annotations+=(--annotate "${MIGRATION_ANNOTATION}=true")
-	fi
+      modified_task_file="/tmp/${task_file##*/}-modified"
+      yq ".metadata.labels.\"app.kubernetes.io/version\" |= \"${task_version}\"" "$task_file" >"$modified_task_file"
+      annotations=()
+      migration_file="hack/task/${task_name}/migrations/${task_version}.sh"
+      if [[ -e "$migration_file" ]]; then
+          annotations+=(--annotate "${MIGRATION_ANNOTATION}=true")
+      fi
 	
-	sha1_hash=$(generate_sha1_hash "$task_version")
-	image_tag="${task_version%.*}-${sha1_hash}"
-	image_with_tag="$image:$image_tag"
-	echo "info: push task bundle $image_with_tag"
-	output=$(tkn_bundle_push "${image_with_tag}" -f "$modified_task_file" "${annotations[@]}")
-	echo "$output"
-	bundle_ref=$(echo "$output" | grep "sha256:[0-9a-f]\+" | cut -d' ' -f5)
+      sha1_hash=$(generate_sha1_hash "$task_version")
+      image_tag="${task_version%.*}-${sha1_hash}"
+      image_with_tag="$image:$image_tag"
+      echo "info: push task bundle $image_with_tag"
+      output=$(tkn_bundle_push "${image_with_tag}" -f "$modified_task_file" "${annotations[@]}")
+      echo "$output"
+      bundle_ref=$(echo "$output" | grep "sha256:[0-9a-f]\+" | cut -d' ' -f5)
 
-	if [[ -e "$migration_file" ]]; then
-	    echo "info: attach migration file ${migration_file} to task bundle ${bundle_ref}"
-	    oras attach --registry-config "$REGISTRY_AUTH_JSON" \
-		--annotation "${MIGRATION_ANNOTATION}=true" \
-		--artifact-type "$MIGRATION_ARTIFACT_TYPE" \
-		--distribution-spec v1.1-referrers-tag \
-		"$bundle_ref" \
-		"$migration_file"
-	fi
+      if [[ -e "$migration_file" ]]; then
+        echo "info: attach migration file ${migration_file} to task bundle ${bundle_ref}"
+        oras attach --registry-config "$REGISTRY_AUTH_JSON" \
+          --annotation "${MIGRATION_ANNOTATION}=true" \
+          --artifact-type "$MIGRATION_ARTIFACT_TYPE" \
+          --distribution-spec v1.1-referrers-tag \
+          "$bundle_ref" \
+          "$migration_file"
+      fi
 
-	
-	if [[ "$task_name" == "clone" ]]; then
-	    clone_upgrades_data+=("$image $image_tag ${bundle_ref##*@}")
-	elif [[ "$task_name" == "tests" ]]; then
-	    tests_upgrades_data+=("$image $image_tag ${bundle_ref##*@}")
-	fi
+
+      if [[ "$task_name" == "clone" ]]; then
+        clone_upgrades_data+=("$image $image_tag ${bundle_ref##*@}")
+      elif [[ "$task_name" == "tests" ]]; then
+        tests_upgrades_data+=("$image $image_tag ${bundle_ref##*@}")
+      fi
     done
 }
 
 
 remove_task_bundles() {
-    local image
-    local -a tags
-    for task_name in "${TASK_NAMES[@]}"; do
-	image="${IMAGE_PREFIX}/task-${task_name}"
-	echo "info: listing tags from image repository ${image}"
-	mapfile -t tags < <(skopeo list-tags "docker://${image}" | jq -r '.Tags[]')
-	for tag_name in "${tags[@]}"; do
-	    echo "info: remove image tag ${image}:${tag_name}"
-	    skopeo delete "docker://${image}:${tag_name}"
-	done
+  local image
+  local -a tags
+  for task_name in "${TASK_NAMES[@]}"; do
+    image="${IMAGE_PREFIX}/task-${task_name}"
+    echo "info: listing tags from image repository ${image}"
+    mapfile -t tags < <(skopeo list-tags "docker://${image}" | jq -r '.Tags[]')
+    for tag_name in "${tags[@]}"; do
+      echo "info: remove image tag ${image}:${tag_name}"
+      skopeo delete "docker://${image}:${tag_name}"
     done
+  done
 }
 
 
@@ -176,19 +176,19 @@ make_renovate_upgrades() {
 
 
 main() {
-    local -r op=$1
-    if [[ "$op" == "build-and-push" ]]; then
-	for task_name in "${TASK_NAMES[@]}"; do
-	    echo "info: build and push task $task_name"
-	    build_and_push "$task_name"
-	done
-	make_renovate_upgrades
-    elif [[ "$op" == "remove-task-bundles" ]]; then
-	remove_task_bundles
-    else
-	echo "info: I don't know what to do for operation $op." >&2
-	return 1
-    fi
+  local -r op=$1
+  if [[ "$op" == "build-and-push" ]]; then
+    for task_name in "${TASK_NAMES[@]}"; do
+      echo "info: build and push task $task_name"
+      build_and_push "$task_name"
+    done
+    make_renovate_upgrades
+  elif [[ "$op" == "remove-task-bundles" ]]; then
+    remove_task_bundles
+  else
+    echo "info: I don't know what to do for operation $op." >&2
+    return 1
+  fi
 }
 
 main "$@"

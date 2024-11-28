@@ -139,10 +139,11 @@ def determine_task_bundle_upgrades_range(
 ) -> list[QuayTagInfo]:
     """Determine task bundles range between given two task bundles
 
-    The determined range consists of task bundles [from task bundle ... to task bundle].
+    The determined range consists of task bundles [new task bundle ... current task bundle].
 
     Each element inside the upgrades range is the raw tag information mapping
-    responded from Quay.io registry, and the range is in the same order as the tags responded.
+    responded from Quay.io registry, and the range is in the same order as the tags responded
+    (newest to oldest).
     """
 
     r: list[QuayTagInfo] = []

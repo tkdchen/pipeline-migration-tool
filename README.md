@@ -29,7 +29,7 @@ export IMAGE_NS=quay.io/account_name
 # Specify an alternative registry authentication file
 export REGISTRY_AUTH_JSON=path/to/auth.json
 
-# build and push sample task bundles task-clone and test-tests.
+# build and push sample task bundles task-clone and task-tests.
 bash ./hack/local-test.sh build-and-push
 
 # Make sure the image repositories are public, especially if you did not create them before running the above command.

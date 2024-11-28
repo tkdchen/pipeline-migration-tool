@@ -348,7 +348,7 @@ class TestResolvePipeline:
     def test_given_file_is_not_yaml_file(self, tmp_path):
         pipeline_file = tmp_path / "invalid.file"
         pipeline_file.write_text("hello world")
-        with pytest.raises(ValueError, match="not a YAML file"):
+        with pytest.raises(ValueError, match="not a YAML mapping"):
             with resolve_pipeline(pipeline_file):
                 pass
 
@@ -706,7 +706,6 @@ class TestApplyMigrations:
 
         def subprocess_run(*args, **kwargs):
             cmd = args[0]
-            assert cmd[:2] == ["bash", "-e"]
             with open(cmd[-1], "r") as f:
                 assert f.read() == PIPELINE_DEFINITION
             with open(cmd[-2], "r") as f:

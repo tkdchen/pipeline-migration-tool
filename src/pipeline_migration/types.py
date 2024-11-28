@@ -1,8 +1,7 @@
 from os import PathLike
-from pathlib import Path
 from typing import TypedDict, NotRequired
 
-FilePath = PathLike | str | Path
+FilePath = PathLike[str] | str
 
 AnnotationsT = dict[str, str]
 

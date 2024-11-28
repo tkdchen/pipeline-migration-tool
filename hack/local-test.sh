@@ -5,7 +5,7 @@ set -o pipefail
 
 # podman login quay.io
 # cp "${XDG_RUNTIME_DIR}/containers/auth.json" ~/.docker/config.json
-REGISTRY_AUTH_JSON="$HOME/.docker/config.json"
+REGISTRY_AUTH_JSON=${REGISTRY_AUTH_JSON:-"$HOME/.docker/config.json"}
 
 MIGRATION_ANNOTATION=dev.konflux-ci.task.migration
 MIGRATION_ARTIFACT_TYPE=text/x-shellscript

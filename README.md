@@ -14,19 +14,37 @@ tox
 ## Local test by running the migration tool
 
 ```bash
+python3 -m venv venv
 source ./venv/bin/activate
+python3 -m pip install -r requirements.txt
 python3 -m pip install -e .
 
-# build and push sample task bundles
+# Log into a registry
+podman login quay.io
+
+# Push sample task bundles to your image repositories
+# For example, the following set will result in bundles like quay.io/account_name/task-clone
+export IMAGE_NS=quay.io/account_name
+
+# Specify an alternative registry authentication file
+export REGISTRY_AUTH_JSON=path/to/auth.json
+
+# build and push sample task bundles task-clone and test-tests.
 bash ./hack/local-test.sh build-and-push
 
+# Make sure the image repositories are public, especially if you did not create them before running the above command.
 # Sample Renovate upgrades data is written into file /tmp/pmt-upgrades-data.txt
 
-# Run the migration tool
-pipeline-migration-tool -u "$(cat /tmp/pmt-upgrades-data.txt)"
+mkdir /tmp/pmt-cache-dir || :
 
-# If needed, run command to remove all task bundles from registry
-bash ./hack/local-test.sh remove-task-bundles
+# Optionally, clear the cache
+# rm /tmp/pmt-cache-dir/*
+
+# Run the migration tool
+pipeline-migration-tool -u "$(cat /tmp/pmt-upgrades-data.txt)" -d /tmp/pmt-cache-dir
+
+# To remove all pushed task bundles from the remote registry
+# bash ./hack/local-test.sh remove-task-bundles
 ```
 
 ## License

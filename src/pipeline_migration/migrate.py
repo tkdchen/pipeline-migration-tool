@@ -59,7 +59,7 @@ class TaskBundleUpgrade:
 
     @property
     def comes_from_konflux(self) -> bool:
-        return self.dep_name.startswith("quay.io/konflux-ci")
+        return self.dep_name.startswith("quay.io/konflux-ci/")
 
     def __post_init__(self) -> None:
         if not self.dep_name:
@@ -100,7 +100,7 @@ def resolve_pipeline(pipeline_file: FilePath) -> Generator[FilePath, Any, None]:
     """
     origin_pipeline = load_yaml(pipeline_file)
     if not isinstance(origin_pipeline, dict):
-        raise ValueError(f"Given file {pipeline_file} is not a YAML file.")
+        raise ValueError(f"Given file {pipeline_file} is not a YAML mapping.")
 
     kind = origin_pipeline.get("kind")
     if kind == TEKTON_KIND_PIPELINE:
@@ -143,7 +143,7 @@ def determine_task_bundle_upgrades_range(
 
     The determined range consists of task bundles [from task bundle ... to task bundle].
 
-    Each element inside the updates range is the raw tag information mapping
+    Each element inside the upgrades range is the raw tag information mapping
     responded from Quay.io registry, and the range is in the same order as the tags responded.
     """
 
@@ -284,7 +284,7 @@ class TaskBundleUpgradesManager:
         with resolve_pipeline(pipeline_file) as file_path:
             logger.info("Executing migration script %s on %s", migration_file, file_path)
             try:
-                subprocess.run(["bash", "-e", migration_file, file_path], check=True)
+                subprocess.run(["bash", migration_file, file_path], check=True)
             finally:
                 os.unlink(migration_file)
 

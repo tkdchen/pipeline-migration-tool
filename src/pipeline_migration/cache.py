@@ -46,7 +46,7 @@ class FileBasedCache:
             return None
         cache_files = list(self._path.glob(f"{key}-*"))
         if not cache_files:
-            return
+            return None
         cache_file = cache_files[0]
         logger.info("Found cached content by key %s", key)
         logger.info("Return cached content from cache file %s", cache_file)

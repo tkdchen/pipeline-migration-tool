@@ -37,7 +37,7 @@ SCHEMA_UPGRADE: Final = {
     ],
 }
 
-SCHEMA_UPGRADES: Final = {
+SCHEMA_UPGRADES: Final[dict[str, Any]] = {
     "$schema": "https://json-schema.org/draft/2020-12",
     "title": "Schema for Renovate upgrades data",
     "type": "array",

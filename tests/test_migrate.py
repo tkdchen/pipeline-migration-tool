@@ -553,7 +553,7 @@ class TestFetchMigrationFile:
             fetch_migration_file(APP_IMAGE_REPO, self.image_digest)
 
     @responses.activate
-    def test_migration_file_is_fetched(self, oci_referrer_descriptor, image_manifest):
+    def test_migration_file_is_fetched(self, oci_referrer_descriptor, image_manifest) -> None:
         c = Container(APP_IMAGE_REPO)
         c.digest = self.image_digest
         bundle_manifest = deepcopy(image_manifest)
@@ -589,7 +589,7 @@ class TestFetchMigrationFile:
 class TestResolveMigrations:
 
     @responses.activate
-    def test_no_tag_is_listed_by_registry(self):
+    def test_no_tag_is_listed_by_registry(self) -> None:
         renovate_upgrades = deepcopy(RENOVATE_UPGRADES)[:1]
         manager = TaskBundleUpgradesManager(renovate_upgrades)
         tb_upgrade = list(manager._task_bundle_upgrades.items())[0][1]
@@ -604,7 +604,7 @@ class TestResolveMigrations:
         assert len(tb_upgrade.migrations) == 0
 
     @responses.activate
-    def test_migrations_are_resolved(self, monkeypatch):
+    def test_migrations_are_resolved(self, monkeypatch) -> None:
         renovate_upgrades = deepcopy(RENOVATE_UPGRADES)[:1]
         manager = TaskBundleUpgradesManager(renovate_upgrades)
 
@@ -643,8 +643,7 @@ class TestResolveMigrations:
         script_content: Final = "echo add a new task to pipeline"
 
         def _fetch_migration_file(image: str, digest: str) -> str | None:
-            if digest in digests_of_images_having_migration:
-                return script_content
+            return script_content if digest in digests_of_images_having_migration else None
 
         monkeypatch.setattr(
             "pipeline_migration.migrate.fetch_migration_file", _fetch_migration_file
@@ -685,7 +684,7 @@ spec:
 class TestApplyMigrations:
 
     @pytest.mark.parametrize("chdir", [True, False])
-    def test_apply_single_migration(self, chdir, monkeypatch, tmp_path):
+    def test_apply_single_migration(self, chdir, monkeypatch, tmp_path) -> None:
         """Test applying a single migration to a pipeline file
 
         The migration tool aims to run inside a component repository, from
@@ -693,7 +692,14 @@ class TestApplyMigrations:
         ``chdir`` indicates to change the working directory for this test to
         test the different behaviors.
         """
-        test_context = {"bash_run": False, "temp_files": []}
+        from dataclasses import dataclass, field
+
+        @dataclass
+        class TestContext:
+            bash_run: bool = False
+            temp_files: list[tuple[int, str]] = field(default_factory=list)
+
+        test_context = TestContext()
         counter = itertools.count()
         migration_script: Final = "echo hello world"
 
@@ -701,7 +707,7 @@ class TestApplyMigrations:
             tmp_file_path = tmp_path / f"temp_file-{next(counter)}"
             tmp_file_path.write_text("")
             fd = os.open(tmp_file_path, os.O_RDWR)
-            test_context["temp_files"].append((fd, tmp_file_path))
+            test_context.temp_files.append((fd, tmp_file_path))
             return fd, tmp_file_path
 
         def subprocess_run(*args, **kwargs):
@@ -711,7 +717,7 @@ class TestApplyMigrations:
             with open(cmd[-2], "r") as f:
                 assert f.read() == migration_script
             assert kwargs.get("check")
-            test_context["bash_run"] = True
+            test_context.bash_run = True
 
         monkeypatch.setattr("tempfile.mkstemp", _mkstemp)
         monkeypatch.setattr("subprocess.run", subprocess_run)
@@ -731,9 +737,9 @@ class TestApplyMigrations:
                 manager._apply_migration("pipeline.yaml", tb_migration)
             return
 
-        assert test_context["bash_run"]
-        assert len(test_context["temp_files"]) > 0
-        for _, file_path in test_context["temp_files"]:
+        assert test_context.bash_run
+        assert len(test_context.temp_files) > 0
+        for _, file_path in test_context.temp_files:
             assert not os.path.exists(file_path)
 
     def test_apply_migrations(self, tmp_path, monkeypatch):

@@ -63,7 +63,7 @@ class TestDescriptor:
         assert d.annotations == descriptor["annotations"]
 
 
-def test_image_index_get_manifest():
+def test_image_index_get_manifest() -> None:
     index_json: ImageIndexT = {
         "schemaVersion": 2,
         "mediaType": MEDIA_TYPE_OCI_IMAGE_INDEX_V1,

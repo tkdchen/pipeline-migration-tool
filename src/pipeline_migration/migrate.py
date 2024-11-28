@@ -318,7 +318,7 @@ def fetch_migration_file(image: str, digest: str) -> str | None:
     manifest = registry.get_manifest(c)
     has_migration = "true" == manifest.get("annotations", {}).get(MIGRATION_ANNOTATION, "false")
     if not has_migration:
-        return
+        return None
 
     # query and fetch migration file via referrers API
     image_index = ImageIndex(data=registry.list_referrers(c, "text/x-shellscript"))
@@ -339,6 +339,7 @@ def fetch_migration_file(image: str, digest: str) -> str | None:
         manifest = registry.get_manifest(c)
         descriptor = manifest["layers"][0]
         return registry.get_artifact(c, descriptor["digest"])
+    return None
 
 
 def migrate(upgrades: list[dict[str, Any]]) -> None:

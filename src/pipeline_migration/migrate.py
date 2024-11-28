@@ -18,8 +18,6 @@ from pipeline_migration.types import FilePath
 # TODO: once the build-and-push.sh is done, correct this name if necessary
 MIGRATION_ANNOTATION: Final[str] = "dev.konflux-ci.task.migration"
 
-BUILD_DEFINITIONS_REPO: Final = "konflux-ci/build-definitions"
-
 TEKTON_KIND_PIPELINE: Final = "Pipeline"
 TEKTON_KIND_PIPELINE_RUN: Final = "PipelineRun"
 ANNOTATION_TRUTH_VALUE: Final = "true"

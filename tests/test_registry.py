@@ -16,7 +16,7 @@ from pipeline_migration.types import DescriptorT, ImageIndexT
 
 
 @pytest.fixture
-def disable_fbc_cache(monkeypatch):
+def disable_cache_cache(monkeypatch):
     monkeypatch.setenv("FILE_BASED_CACHE_DISABLED", "true")
 
 
@@ -98,13 +98,13 @@ class TestListReferrers:
         return mock_resp
 
     @responses.activate
-    def test_list_referrers(self, mock_fbc_dir, disable_fbc_cache):
+    def test_list_referrers(self, setup_cache_dir, disable_cache_cache):
         mock_resp = self._make_list_request(2)
         assert mock_resp.call_count == 2
-        assert not list(mock_fbc_dir.iterdir())
+        assert not list(setup_cache_dir.iterdir())
 
     @responses.activate
-    def test_list_referrers_by_artifact_type(self, disable_fbc_cache):
+    def test_list_referrers_by_artifact_type(self, disable_cache_cache):
         digest = generate_digest()
         c = Container(f"reg.io/ns/app@{digest}")
         expected_image_index = copy.deepcopy(IMAGE_INDEX)
@@ -116,7 +116,7 @@ class TestListReferrers:
         assert image_index["manifests"] == [REFERRER_DESCRIPTOR.copy()]
 
     @responses.activate
-    def test_ensure_error_response_is_handled(self, monkeypatch, caplog, disable_fbc_cache):
+    def test_ensure_error_response_is_handled(self, monkeypatch, caplog, disable_cache_cache):
         monkeypatch.setattr("time.sleep", lambda n: n)  # make oras retry not sleep
         digest = generate_digest()
         c = Container(f"reg.io/ns/app@{digest}")
@@ -127,10 +127,10 @@ class TestListReferrers:
         assert "something is wrong" in caplog.text
 
     @responses.activate
-    def test_list_referrers_with_cache(self, mock_fbc_dir):
+    def test_list_referrers_with_cache(self, setup_cache_dir):
         mock_resp = self._make_list_request(3)
         assert mock_resp.call_count == 1
-        files = list(mock_fbc_dir.iterdir())
+        files = list(setup_cache_dir.iterdir())
         assert len(files) == 1
         expected_image_index = copy.deepcopy(IMAGE_INDEX)
         expected_image_index["manifests"].extend(
@@ -154,20 +154,20 @@ class TestRegistryGetManifest:
         return mock_resp
 
     @responses.activate
-    def test_get_with_cache(self, mock_fbc_dir, image_manifest):
+    def test_get_with_cache(self, setup_cache_dir, image_manifest):
         mock_resp = self._make_get_manifest_requests(image_manifest, 2)
         assert mock_resp.call_count == 1
         # Verify image manifest is cached
-        files = list(mock_fbc_dir.iterdir())
+        files = list(setup_cache_dir.iterdir())
         assert len(files) == 1
         assert json.loads(files[0].read_text()) == image_manifest
 
     @responses.activate
-    def test_get_without_cache(self, mock_fbc_dir, image_manifest, disable_fbc_cache):
+    def test_get_without_cache(self, setup_cache_dir, image_manifest, disable_cache_cache):
         mock_resp = self._make_get_manifest_requests(image_manifest, 3)
         assert mock_resp.call_count == 3
         # Verify image manifest is cached
-        assert not list(mock_fbc_dir.iterdir())
+        assert not list(setup_cache_dir.iterdir())
 
 
 class TestRegistryGetArtifact:
@@ -187,16 +187,16 @@ class TestRegistryGetArtifact:
         return mock_resp
 
     @responses.activate
-    def test_get_with_cache(self, mock_fbc_dir):
+    def test_get_with_cache(self, setup_cache_dir):
         mock_resp = self._make_get_artifact_requests(10)
         assert mock_resp.call_count == 1
-        files = list(mock_fbc_dir.iterdir())
+        files = list(setup_cache_dir.iterdir())
         assert len(files) == 1
         assert files[0].read_text() == self.expected_content
 
     @responses.activate
-    def test_get_without_cache(self, mock_fbc_dir, disable_fbc_cache):
+    def test_get_without_cache(self, setup_cache_dir, disable_cache_cache):
         expected_call_count = 4
         mock_resp = self._make_get_artifact_requests(expected_call_count)
         assert mock_resp.call_count == expected_call_count
-        assert not list(mock_fbc_dir.iterdir())
+        assert not list(setup_cache_dir.iterdir())

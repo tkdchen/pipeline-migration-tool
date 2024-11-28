@@ -4,7 +4,7 @@ import tempfile
 
 import pytest
 
-from pipeline_migration.cache import ENV_FBC_DIR, FBC_DIR_PREFIX
+from pipeline_migration.cache import ENV_CACHE_DIR, CACHE_DIR_PREFIX
 from pipeline_migration.types import DescriptorT, ManifestT
 from pipeline_migration.registry import (
     MEDIA_TYPE_OCI_IMAGE_CONFIG_V1,
@@ -22,18 +22,18 @@ def remove_cache_dir(caplog, request):
     def _remove_existing_cache_dir():
         tmp_dir = tempfile.gettempdir()
         for name in os.listdir(tmp_dir):
-            if name.startswith(FBC_DIR_PREFIX):
+            if name.startswith(CACHE_DIR_PREFIX):
                 shutil.rmtree(os.path.join(tmp_dir, name))
 
     request.addfinalizer(_remove_existing_cache_dir)
 
 
 @pytest.fixture(autouse=True)
-def mock_fbc_dir(monkeypatch, tmp_path):
-    fbc_dir = tmp_path / "file-based-cache"
-    fbc_dir.mkdir()
-    monkeypatch.setenv(ENV_FBC_DIR, str(fbc_dir))
-    return fbc_dir
+def setup_cache_dir(monkeypatch, tmp_path):
+    cache_dir = tmp_path / "file-based-cache"
+    cache_dir.mkdir()
+    monkeypatch.setenv(ENV_CACHE_DIR, str(cache_dir))
+    return cache_dir
 
 
 @pytest.fixture

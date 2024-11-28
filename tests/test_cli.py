@@ -8,7 +8,7 @@ import responses
 import pytest
 from oras.types import container_type
 
-from pipeline_migration.cache import ENV_FBC_DIR, FBC_DIR_PREFIX
+from pipeline_migration.cache import ENV_CACHE_DIR, CACHE_DIR_PREFIX
 from pipeline_migration.cli import entry_point
 from pipeline_migration.migrate import MIGRATION_ANNOTATION
 from pipeline_migration.registry import (
@@ -39,23 +39,23 @@ UPGRADES: Final = [
 ]
 
 
-class TestSetFBCDir:
+class TestSetFileBasedCacheDir:
 
     def test_set_from_command_line(self, monkeypatch, tmp_path):
-        monkeypatch.delenv(ENV_FBC_DIR)
+        monkeypatch.delenv(ENV_CACHE_DIR)
         monkeypatch.setattr("sys.argv", ["mt", "-u", json.dumps(UPGRADES), "-d", str(tmp_path)])
         monkeypatch.setattr("pipeline_migration.cli.migrate", lambda arg: 1)
         assert entry_point() is None
-        assert os.environ[ENV_FBC_DIR] == str(tmp_path)
+        assert os.environ[ENV_CACHE_DIR] == str(tmp_path)
 
     def test_fallback_to_a_temporary_dir(self, monkeypatch):
-        monkeypatch.delenv(ENV_FBC_DIR)
+        monkeypatch.delenv(ENV_CACHE_DIR)
         monkeypatch.setattr("sys.argv", ["mt", "-u", json.dumps(UPGRADES)])
         monkeypatch.setattr("pipeline_migration.cli.migrate", lambda arg: 1)
         assert entry_point() is None
-        cache_dir = os.environ[ENV_FBC_DIR]
+        cache_dir = os.environ[ENV_CACHE_DIR]
         assert os.path.isdir(cache_dir)
-        assert os.path.basename(cache_dir.rstrip("/")).startswith(FBC_DIR_PREFIX)
+        assert os.path.basename(cache_dir.rstrip("/")).startswith(CACHE_DIR_PREFIX)
 
 
 @dataclass

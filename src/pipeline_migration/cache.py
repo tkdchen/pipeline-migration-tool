@@ -9,8 +9,8 @@ from pipeline_migration.utils import is_true
 
 logger = logging.getLogger("cache")
 
-ENV_FBC_DIR: Final = "FILE_BASED_CACHE_DIR"
-FBC_DIR_PREFIX: Final = "pmt-fbc-dir-"
+ENV_CACHE_DIR: Final = "FILE_BASED_CACHE_DIR"
+CACHE_DIR_PREFIX: Final = "pmt-cache-dir-"
 
 
 class FileBasedCache:
@@ -69,7 +69,7 @@ class FileBasedCache:
 
 
 def set_cache_dir(dir_path: str) -> None:
-    cache_dir = os.environ.get(ENV_FBC_DIR)
+    cache_dir = os.environ.get(ENV_CACHE_DIR)
     if cache_dir:
         if not os.path.exists(cache_dir):
             raise ValueError(f"Cache directory {cache_dir} does not exist.")
@@ -77,25 +77,25 @@ def set_cache_dir(dir_path: str) -> None:
 
     if dir_path:
         if os.path.exists(dir_path):
-            os.environ[ENV_FBC_DIR] = dir_path
+            os.environ[ENV_CACHE_DIR] = dir_path
         else:
             raise ValueError(f"Cache directory {dir_path} does not exist.")
         return
 
-    cache_dir = tempfile.mkdtemp(prefix=FBC_DIR_PREFIX)
+    cache_dir = tempfile.mkdtemp(prefix=CACHE_DIR_PREFIX)
     logger.info(
         "Cache directory is not specified either from command line or by environment "
         "variable %s, use directory %s instead.",
-        ENV_FBC_DIR,
+        ENV_CACHE_DIR,
         cache_dir,
     )
-    os.environ[ENV_FBC_DIR] = cache_dir
+    os.environ[ENV_CACHE_DIR] = cache_dir
 
 
 def get_cache() -> FileBasedCache:
-    cache_dir = os.environ.get(ENV_FBC_DIR)
+    cache_dir = os.environ.get(ENV_CACHE_DIR)
     if not cache_dir:
-        raise ValueError(f"Missing environment variable {ENV_FBC_DIR}.")
+        raise ValueError(f"Missing environment variable {ENV_CACHE_DIR}.")
     dir_path = Path(cache_dir)
     if not dir_path.exists():
         raise ValueError(f"Cache directory {dir_path} does not exist.")

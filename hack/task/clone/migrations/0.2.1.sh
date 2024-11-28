@@ -1,2 +1,5 @@
+#!/usr/bin/env bash
+set -e
+
 pipeline_file=$1
-echo "add new task" >>"$pipeline_file"
+yq -i '.metadata.annotations.changes += "add new task"' "$pipeline_file"

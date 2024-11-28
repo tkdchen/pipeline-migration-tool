@@ -1,2 +1,5 @@
+#!/usr/bin/env python
+set -e
+
 pipeline_file=$1
-echo "remove task params" >>"$pipeline_file"
+yq -i '.metadata.annotations.changes += "remove task params"' "$pipeline_file"

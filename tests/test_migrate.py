@@ -11,6 +11,7 @@ from pipeline_migration.migrate import (
     ANNOTATION_TRUTH_VALUE,
     determine_task_bundle_upgrades_range,
     fetch_migration_file,
+    IncorrectMigrationAttachment,
     InvalidRenovateUpgradesData,
     MIGRATION_ANNOTATION,
     resolve_pipeline,
@@ -527,6 +528,29 @@ class TestFetchMigrationFile:
 
         r = fetch_migration_file(APP_IMAGE_REPO, self.image_digest)
         assert r is None
+
+    @responses.activate
+    def test_fail_if_no_single_migration_per_task_bundle(
+        self, image_manifest, oci_referrer_descriptor
+    ):
+        c = Container(APP_IMAGE_REPO)
+        c.digest = self.image_digest
+        image_manifest["annotations"] = {MIGRATION_ANNOTATION: ANNOTATION_TRUTH_VALUE}
+        responses.get(f"https://{c.manifest_url()}", json=image_manifest)
+
+        referrers = []
+        for _ in range(3):
+            referrer = deepcopy(oci_referrer_descriptor)
+            referrer["annotations"] = {MIGRATION_ANNOTATION: ANNOTATION_TRUTH_VALUE}
+            referrers.append(referrer)
+
+        responses.get(
+            f"https://{c.referrers_url}?artifactType=text/x-shellscript",
+            json={"schemaVersion": 2, "manifests": referrers, "annotations": {}},
+        )
+
+        with pytest.raises(IncorrectMigrationAttachment):
+            fetch_migration_file(APP_IMAGE_REPO, self.image_digest)
 
     @responses.activate
     def test_migration_file_is_fetched(self, oci_referrer_descriptor, image_manifest):

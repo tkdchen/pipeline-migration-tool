@@ -8,6 +8,7 @@ from oras.provider import Registry as OrasRegistry
 from oras.container import Container as OrasContainer
 from oras.decorator import ensure_container
 from oras.types import container_type
+from requests.models import Response as Response
 
 from pipeline_migration.cache import get_cache
 from pipeline_migration.types import AnnotationsT, ImageIndexT, DescriptorT
@@ -86,6 +87,12 @@ class Registry(OrasRegistry):
             return manifest
         else:
             return json.loads(v)
+
+    @ensure_container
+    def get_blob(self, *args, **kwargs) -> Response:
+        response = super().get_blob(*args, **kwargs)
+        self._check_200_response(response)
+        return response
 
     @ensure_container
     def get_artifact(self, container: container_type, digest: str) -> str:

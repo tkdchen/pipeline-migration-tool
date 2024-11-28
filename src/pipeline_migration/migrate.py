@@ -295,6 +295,10 @@ class TaskBundleUpgradesManager:
                     self._apply_migration(package_file.file_path, migration)
 
 
+class IncorrectMigrationAttachment(Exception):
+    pass
+
+
 def fetch_migration_file(image: str, digest: str) -> str | None:
     """Fetch migration file for a task bundle
 
@@ -323,6 +327,13 @@ def fetch_migration_file(image: str, digest: str) -> str | None:
         for descriptor in image_index.manifests
         if is_true(descriptor.annotations.get(MIGRATION_ANNOTATION, "false"))
     ]
+    if len(descriptors) > 1:
+        msg = (
+            f"{len(descriptors)} referrers containing migration script are listed. "
+            "However, there should be one per task bundle."
+        )
+        logger.warning(msg)
+        raise IncorrectMigrationAttachment(msg)
     if descriptors:
         c.digest = descriptors[0].digest
         manifest = registry.get_manifest(c)

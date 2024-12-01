@@ -10,7 +10,7 @@ from oras.decorator import ensure_container
 from oras.types import container_type
 from requests.models import Response as Response
 
-from pipeline_migration.cache import get_cache
+from pipeline_migration.cache import FileBasedCache
 from pipeline_migration.types import AnnotationsT, ImageIndexT, DescriptorT
 
 MEDIA_TYPE_OCI_EMTPY_V1: Final = "application/vnd.oci.empty.v1+json"
@@ -65,7 +65,7 @@ class Registry(OrasRegistry):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._cache = get_cache()
+        self._cache = FileBasedCache()
 
     @staticmethod
     def _container_key(c: Container, digest: str | None = None) -> str:

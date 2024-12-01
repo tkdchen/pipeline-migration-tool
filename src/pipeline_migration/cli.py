@@ -1,12 +1,13 @@
 import argparse
 import json
 import logging
+import tempfile
 from typing import Any, Final
 
 from jsonschema.exceptions import ValidationError
 from jsonschema.validators import Draft202012Validator
 
-from pipeline_migration.cache import set_cache_dir
+from pipeline_migration.cache import CACHE_DIR_PREFIX, FileBasedCache
 from pipeline_migration.migrate import InvalidRenovateUpgradesData, migrate
 
 logging.basicConfig(level=logging.DEBUG, format="%(levelname)s:%(asctime)s:%(name)s:%(message)s")
@@ -89,10 +90,14 @@ def main() -> None:
         metavar="JSON_STR",
         help="A JSON string converted from Renovate template field upgrades.",
     )
-    parser.add_argument("-d", "--cache-dir", metavar="PATH", help="Path to the cache directory.")
+    parser.add_argument(
+        "-d", "--cache-dir", metavar="PATH", help="Path to the existing cache directory."
+    )
 
     args = parser.parse_args()
-    set_cache_dir(args.cache_dir)
+
+    cache_dir = args.cache_dir or tempfile.mkdtemp(prefix=CACHE_DIR_PREFIX)
+    FileBasedCache.configure(cache_dir=cache_dir)
 
     migrate(validate_upgrades(args.renovate_upgrades))
 

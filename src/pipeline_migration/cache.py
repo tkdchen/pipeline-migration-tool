@@ -3,14 +3,17 @@ import tempfile
 
 import logging
 from pathlib import Path
-from typing import Final
-
-from pipeline_migration.utils import is_true
+from typing import Final, TypedDict
 
 logger = logging.getLogger("cache")
 
 ENV_CACHE_DIR: Final = "FILE_BASED_CACHE_DIR"
 CACHE_DIR_PREFIX: Final = "pmt-cache-dir-"
+
+
+class CacheConfigT(TypedDict):
+    cache_dir: str
+    disabled: bool
 
 
 class FileBasedCache:
@@ -34,17 +37,46 @@ class FileBasedCache:
     repositories.
     """
 
-    def __init__(self, path: Path) -> None:
-        self._path = path
-        self._disabled = is_true(os.environ.get("FILE_BASED_CACHE_DISABLED", ""))
+    config: CacheConfigT = {
+        "cache_dir": "",
+        "disabled": False,
+    }
+
+    @classmethod
+    def configure(cls, cache_dir: str, disable: bool = False):
+        cls.config["cache_dir"] = cache_dir
+        cls.config["disabled"] = disable
+
+    @classmethod
+    def validate_config(cls) -> None:
+        if not cls.config["cache_dir"]:
+            raise ValueError("Cache directory path is not set yet.")
+        cache_dir = Path(cls.config["cache_dir"])
+        if not cache_dir.is_absolute():
+            raise ValueError(f"Cache directory {str(cache_dir)} is not an absolute path.")
+        if not cache_dir.is_dir():
+            raise IOError(f"Path {str(cache_dir)} is not a directory.")
+        return None
+
+    def __new__(cls, *args, **kwargs):
+        cls.validate_config()
+        return super().__new__(cls, *args, **kwargs)
+
+    @property
+    def path(self) -> Path:
+        return Path(self.config["cache_dir"])
+
+    @property
+    def disabled(self) -> bool:
+        return self.config["disabled"]
 
     def get(self, key: str) -> str | None:
         if not key:
             raise ValueError("Key is empty.")
-        if self._disabled:
+        if self.disabled:
             logger.info("Cache is disabled. Nothing is cached.")
             return None
-        cache_files = list(self._path.glob(f"{key}-*"))
+        cache_files = list(self.path.glob(f"{key}-*"))
         if not cache_files:
             return None
         cache_file = cache_files[0]
@@ -56,47 +88,13 @@ class FileBasedCache:
     def set(self, key: str, content: str) -> None:
         if not key:
             raise ValueError("Key is empty.")
-        if self._disabled:
+        if self.disabled:
             logger.info("Cache is disabled. Nothing is set.")
             return None
         logger.info("Cache content with key key %s", key)
-        fd, cache_file = tempfile.mkstemp(prefix=f"{key}-", dir=self._path)
+        fd, cache_file = tempfile.mkstemp(prefix=f"{key}-", dir=self.path)
         try:
             os.write(fd, content.encode("utf-8"))
         finally:
             os.close(fd)
         logger.info("Content is cached into file %s", cache_file)
-
-
-def set_cache_dir(dir_path: str) -> None:
-    cache_dir = os.environ.get(ENV_CACHE_DIR)
-    if cache_dir:
-        if not os.path.exists(cache_dir):
-            raise ValueError(f"Cache directory {cache_dir} does not exist.")
-        return
-
-    if dir_path:
-        if os.path.exists(dir_path):
-            os.environ[ENV_CACHE_DIR] = dir_path
-        else:
-            raise ValueError(f"Cache directory {dir_path} does not exist.")
-        return
-
-    cache_dir = tempfile.mkdtemp(prefix=CACHE_DIR_PREFIX)
-    logger.info(
-        "Cache directory is not specified either from command line or by environment "
-        "variable %s, use directory %s instead.",
-        ENV_CACHE_DIR,
-        cache_dir,
-    )
-    os.environ[ENV_CACHE_DIR] = cache_dir
-
-
-def get_cache() -> FileBasedCache:
-    cache_dir = os.environ.get(ENV_CACHE_DIR)
-    if not cache_dir:
-        raise ValueError(f"Missing environment variable {ENV_CACHE_DIR}.")
-    dir_path = Path(cache_dir)
-    if not dir_path.exists():
-        raise ValueError(f"Cache directory {dir_path} does not exist.")
-    return FileBasedCache(dir_path)

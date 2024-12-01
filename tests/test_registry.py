@@ -15,11 +15,6 @@ from pipeline_migration.registry import (
 from pipeline_migration.types import DescriptorT, ImageIndexT
 
 
-@pytest.fixture
-def disable_cache_cache(monkeypatch):
-    monkeypatch.setenv("FILE_BASED_CACHE_DISABLED", "true")
-
-
 @pytest.mark.parametrize("tag", ["", "0.1"])
 def test_container_uri_with_tag(tag):
     image = "reg.io/ns/app"
@@ -76,7 +71,7 @@ def test_image_index_get_manifest() -> None:
 
 class TestListReferrers:
 
-    def test_fail_missing_digest(self):
+    def test_fail_missing_digest(self, file_based_cache):
         c = Container("reg.io/ns/app:0.1")
         with pytest.raises(ValueError, match="Missing digest"):
             Registry().list_referrers(c)
@@ -98,13 +93,13 @@ class TestListReferrers:
         return mock_resp
 
     @responses.activate
-    def test_list_referrers(self, setup_cache_dir, disable_cache_cache):
+    def test_list_referrers(self, disable_file_based_cache):
         mock_resp = self._make_list_request(2)
         assert mock_resp.call_count == 2
-        assert not list(setup_cache_dir.iterdir())
+        assert not list(disable_file_based_cache.path.iterdir())
 
     @responses.activate
-    def test_list_referrers_by_artifact_type(self, disable_cache_cache):
+    def test_list_referrers_by_artifact_type(self, disable_file_based_cache):
         digest = generate_digest()
         c = Container(f"reg.io/ns/app@{digest}")
         expected_image_index = copy.deepcopy(IMAGE_INDEX)
@@ -116,7 +111,7 @@ class TestListReferrers:
         assert image_index["manifests"] == [REFERRER_DESCRIPTOR.copy()]
 
     @responses.activate
-    def test_ensure_error_response_is_handled(self, monkeypatch, caplog, disable_cache_cache):
+    def test_ensure_error_response_is_handled(self, monkeypatch, caplog, disable_file_based_cache):
         monkeypatch.setattr("time.sleep", lambda n: n)  # make oras retry not sleep
         digest = generate_digest()
         c = Container(f"reg.io/ns/app@{digest}")
@@ -127,10 +122,10 @@ class TestListReferrers:
         assert "something is wrong" in caplog.text
 
     @responses.activate
-    def test_list_referrers_with_cache(self, setup_cache_dir):
+    def test_list_referrers_with_cache(self, file_based_cache):
         mock_resp = self._make_list_request(3)
         assert mock_resp.call_count == 1
-        files = list(setup_cache_dir.iterdir())
+        files = list(file_based_cache.path.iterdir())
         assert len(files) == 1
         expected_image_index = copy.deepcopy(IMAGE_INDEX)
         expected_image_index["manifests"].extend(
@@ -154,20 +149,20 @@ class TestRegistryGetManifest:
         return mock_resp
 
     @responses.activate
-    def test_get_with_cache(self, setup_cache_dir, image_manifest):
+    def test_get_with_cache(self, file_based_cache, image_manifest):
         mock_resp = self._make_get_manifest_requests(image_manifest, 2)
         assert mock_resp.call_count == 1
         # Verify image manifest is cached
-        files = list(setup_cache_dir.iterdir())
+        files = list(file_based_cache.path.iterdir())
         assert len(files) == 1
         assert json.loads(files[0].read_text()) == image_manifest
 
     @responses.activate
-    def test_get_without_cache(self, setup_cache_dir, image_manifest, disable_cache_cache):
+    def test_get_without_cache(self, image_manifest, disable_file_based_cache):
         mock_resp = self._make_get_manifest_requests(image_manifest, 3)
         assert mock_resp.call_count == 3
         # Verify image manifest is cached
-        assert not list(setup_cache_dir.iterdir())
+        assert not list(disable_file_based_cache.path.iterdir())
 
 
 class TestRegistryGetArtifact:
@@ -187,16 +182,16 @@ class TestRegistryGetArtifact:
         return mock_resp
 
     @responses.activate
-    def test_get_with_cache(self, setup_cache_dir):
+    def test_get_with_cache(self, file_based_cache):
         mock_resp = self._make_get_artifact_requests(10)
         assert mock_resp.call_count == 1
-        files = list(setup_cache_dir.iterdir())
+        files = list(file_based_cache.path.iterdir())
         assert len(files) == 1
         assert files[0].read_text() == self.expected_content
 
     @responses.activate
-    def test_get_without_cache(self, setup_cache_dir, disable_cache_cache):
+    def test_get_without_cache(self, disable_file_based_cache):
         expected_call_count = 4
         mock_resp = self._make_get_artifact_requests(expected_call_count)
         assert mock_resp.call_count == expected_call_count
-        assert not list(setup_cache_dir.iterdir())
+        assert not list(disable_file_based_cache.path.iterdir())

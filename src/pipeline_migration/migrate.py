@@ -1,7 +1,7 @@
 import logging
 import os.path
 import re
-import subprocess
+import subprocess as sp
 import tempfile
 
 from collections.abc import Generator
@@ -282,8 +282,11 @@ class TaskBundleUpgradesManager:
 
         with resolve_pipeline(pipeline_file) as file_path:
             logger.info("Executing migration script %s on %s", migration_file, file_path)
+            cmd = ["bash", migration_file, file_path]
+            logger.debug("Run: %r", cmd)
             try:
-                subprocess.run(["bash", migration_file, file_path], check=True)
+                proc = sp.run(cmd, check=True, stderr=sp.STDOUT, capture_output=True)
+                logger.debug("%s", proc.stdout)
             finally:
                 os.unlink(migration_file)
 

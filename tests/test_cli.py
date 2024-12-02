@@ -1,5 +1,6 @@
 import json
 import os
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
@@ -288,6 +289,7 @@ class TestMigrateSingleTaskBundleUpgrade:
             assert pipeline_file == tb_upgrades[0]["packageFile"]
             migration_file = cmd[-2]
             assert Path(migration_file).read_bytes() in migration_steps
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
         monkeypatch.setattr("subprocess.run", _subprocess_run)
 

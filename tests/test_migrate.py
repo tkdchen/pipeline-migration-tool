@@ -1,5 +1,6 @@
 import os
 import itertools
+import subprocess
 from copy import deepcopy
 from textwrap import dedent
 from typing import Any, Final
@@ -718,6 +719,7 @@ class TestApplyMigrations:
                 assert f.read() == migration_script
             assert kwargs.get("check")
             test_context.bash_run = True
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
         monkeypatch.setattr("tempfile.mkstemp", _mkstemp)
         monkeypatch.setattr("subprocess.run", subprocess_run)
@@ -795,6 +797,7 @@ class TestApplyMigrations:
             cmd = args[0]
             with open(cmd[-2], "r") as f:
                 test_context["executed_scripts"].append(f.read())
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
         monkeypatch.setattr("tempfile.mkstemp", _mkstemp)
         monkeypatch.setattr("subprocess.run", subprocess_run)

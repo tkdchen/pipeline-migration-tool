@@ -26,6 +26,9 @@ podman login quay.io
 # For example, the following set will result in bundles like quay.io/account_name/task-clone
 export IMAGE_NS=quay.io/account_name
 
+# Enable local test in order to work with images from arbitrary image organization.
+export PMT_LOCAL_TEST=on
+
 # Specify an alternative registry authentication file
 export REGISTRY_AUTH_JSON=path/to/auth.json
 

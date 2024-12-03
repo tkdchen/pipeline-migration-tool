@@ -57,6 +57,12 @@ class TaskBundleUpgrade:
 
     @property
     def comes_from_konflux(self) -> bool:
+        if os.environ.get("PMT_LOCAL_TEST"):
+            logger.warning(
+                "Environment variable PMT_LOCAL_TEST is set. Migration tool works with images "
+                "from arbitrary registry organization."
+            )
+            return True
         return self.dep_name.startswith("quay.io/konflux-ci/")
 
     def __post_init__(self) -> None:

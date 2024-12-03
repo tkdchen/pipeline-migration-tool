@@ -285,8 +285,9 @@ class TaskBundleUpgradesManager:
             cmd = ["bash", migration_file, file_path]
             logger.debug("Run: %r", cmd)
             try:
-                proc = sp.run(cmd, check=True, stderr=sp.STDOUT, capture_output=True)
-                logger.debug("%s", proc.stdout)
+                proc = sp.run(cmd, stderr=sp.STDOUT, stdout=sp.PIPE)
+                logger.debug("%r", proc.stdout)
+                proc.check_returncode()
             finally:
                 os.unlink(migration_file)
 

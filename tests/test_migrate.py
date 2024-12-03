@@ -1,5 +1,6 @@
 import os
 import itertools
+import logging
 import subprocess
 from copy import deepcopy
 from textwrap import dedent
@@ -717,7 +718,7 @@ class TestApplyMigrations:
                 assert f.read() == PIPELINE_DEFINITION
             with open(cmd[-2], "r") as f:
                 assert f.read() == migration_script
-            assert kwargs.get("check")
+            assert not kwargs.get("check")
             test_context.bash_run = True
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
@@ -806,3 +807,30 @@ class TestApplyMigrations:
         manager.apply_migrations()
 
         assert test_context["executed_scripts"] == ["echo add a new task", "echo remove task param"]
+
+    def test_raise_error_if_migration_process_fails(self, caplog, monkeypatch, tmp_path):
+        caplog.set_level(logging.DEBUG, logger="migrate")
+
+        def _mkstemp(*args, **kwargs):
+            tmp_file_path = tmp_path / "migration_file"
+            tmp_file_path.write_text("")
+            fd = os.open(tmp_file_path, os.O_RDWR)
+            return fd, tmp_file_path
+
+        def subprocess_run(cmd, *args, **kwargs):
+            assert not kwargs.get("check")
+            return subprocess.CompletedProcess(
+                cmd, 1, stdout="normal output\nerror: something is wrong"
+            )
+
+        monkeypatch.setattr("tempfile.mkstemp", _mkstemp)
+        monkeypatch.setattr("subprocess.run", subprocess_run)
+
+        pipeline_file: Final = tmp_path / "pipeline.yaml"
+        pipeline_file.write_text("kind: Pipeline")
+
+        manager = TaskBundleUpgradesManager(deepcopy(RENOVATE_UPGRADES))
+        tb_migration = TaskBundleMigration("task-bundle:0.3@sha256:1234", "echo remove a param")
+        with pytest.raises(subprocess.CalledProcessError):
+            manager._apply_migration(pipeline_file, tb_migration)
+        assert "something is wrong" in caplog.text

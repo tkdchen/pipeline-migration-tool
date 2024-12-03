@@ -49,7 +49,7 @@ declare -a tests_upgrades_data=()
 
 build_and_push() {
   local -r task_name="$1"
-  local -r task_file="hack/task/${task_name}/${task_name}.yaml"
+  local -r task_file="hack/local-test/task/${task_name}/${task_name}.yaml"
   local -r image="${IMAGE_PREFIX}/task-${task_name}"
   local -a task_versions=()
 
@@ -66,7 +66,7 @@ build_and_push() {
   do
     echo "info: handle task version ${task_version}"
     modified_task_file="/tmp/${task_file##*/}-modified"
-    migration_file="hack/task/${task_name}/migrations/${task_version}.sh"
+    migration_file="hack/local-test/task/${task_name}/migrations/${task_version}.sh"
 
     yq ".metadata.labels.\"app.kubernetes.io/version\" |= \"${task_version}\"" "$task_file" | \
       yq ".metadata.labels.\"dev.konflux-ci/updated-datetime\" |= \"$(date)\"" \
@@ -147,7 +147,7 @@ make_renovate_upgrades() {
 \"currentDigest\": \"${current_digest}\",
 \"newValue\": \"${new_value}\",
 \"newDigest\": \"${new_digest}\",
-\"packageFile\": \"local-tests/ci-pipeline.yaml\",
+\"packageFile\": \"hack/local-test/ci-pipeline.yaml\",
 \"parentDir\": \"local-tests\",
 \"depTypes\": [\"tekton-bundle\"]
 }," | tee -a "$data_file"
@@ -169,7 +169,7 @@ make_renovate_upgrades() {
 \"currentDigest\": \"${current_digest}\",
 \"newValue\": \"${new_value}\",
 \"newDigest\": \"${new_digest}\",
-\"packageFile\": \"local-tests/ci-pipeline.yaml\",
+\"packageFile\": \"hack/local-test/ci-pipeline.yaml\",
 \"parentDir\": \"local-tests\",
 \"depTypes\": [\"tekton-bundle\"]
 }" | tee -a "$data_file"

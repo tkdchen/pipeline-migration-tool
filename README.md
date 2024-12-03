@@ -30,7 +30,7 @@ export IMAGE_NS=quay.io/account_name
 export REGISTRY_AUTH_JSON=path/to/auth.json
 
 # build and push sample task bundles task-clone and task-tests.
-bash ./hack/local-test.sh build-and-push
+bash ./hack/local-test/run.sh build-and-push
 
 # Make sure the image repositories are public, especially if you did not create them before running the above command.
 # Sample Renovate upgrades data is written into file /tmp/pmt-upgrades-data.txt
@@ -44,7 +44,7 @@ mkdir /tmp/pmt-cache-dir || :
 pipeline-migration-tool -u "$(cat /tmp/pmt-upgrades-data.txt)" -d /tmp/pmt-cache-dir
 
 # To remove all pushed task bundles from the remote registry
-# bash ./hack/local-test.sh remove-task-bundles
+# bash ./hack/local-test/run.sh remove-task-bundles
 ```
 
 ## License

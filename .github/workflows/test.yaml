@@ -1,0 +1,20 @@
+name: Test
+on:
+  pull_request:
+    branches: [main]
+jobs:
+  run-tests:
+    name: run-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: |
+          python3 -m pip install -r requirements-test.txt
+          tox
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}

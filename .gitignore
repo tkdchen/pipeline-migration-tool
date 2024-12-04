@@ -1,7 +1,10 @@
 *.swp
 *~
-
+.coverage
 *.egg-info/
-.venv
+.venv/
 dist/
 __pycache__/
+.tox/
+.idea/
+local-tests/

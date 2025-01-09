@@ -353,3 +353,16 @@ def test_cli_stops_if_input_upgrades_is_invalid(upgrades, expected_err_msgs, mon
     assert entry_point() == 1
     for err_msg in expected_err_msgs:
         assert err_msg in caplog.text
+
+
+def test_ensure_cache_dir_is_created(tmp_path, monkeypatch):
+
+    def fake_migrate_method(*args, **kwargs):
+        """This method is used for test_ensure_cache_dir_is_created only"""
+
+    monkeypatch.setattr("pipeline_migration.cli.migrate", fake_migrate_method)
+    cache_dir = tmp_path / "cache"
+    cli_cmd = ["pmt", "-u", json.dumps(UPGRADES), "--cache-dir", str(cache_dir)]
+    monkeypatch.setattr("sys.argv", cli_cmd)
+    entry_point()
+    assert cache_dir.exists()

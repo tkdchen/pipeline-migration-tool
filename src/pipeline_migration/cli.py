@@ -1,6 +1,7 @@
 import argparse
 import json
 import logging
+import os.path
 import tempfile
 from typing import Any, Final
 
@@ -97,6 +98,8 @@ def main() -> None:
     args = parser.parse_args()
 
     cache_dir = args.cache_dir or tempfile.mkdtemp(prefix=CACHE_DIR_PREFIX)
+    if not os.path.exists(cache_dir):
+        os.makedirs(cache_dir, exist_ok=True)
     FileBasedCache.configure(cache_dir=cache_dir)
 
     migrate(validate_upgrades(args.renovate_upgrades))

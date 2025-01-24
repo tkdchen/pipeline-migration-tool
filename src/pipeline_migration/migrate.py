@@ -5,6 +5,7 @@ import subprocess as sp
 import tempfile
 
 from collections.abc import Generator
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Final, Any
@@ -262,12 +263,21 @@ class TaskBundleUpgradesManager:
 
     def resolve_migrations(self) -> None:
         """Resolve migrations for given task bundle upgrades"""
-        for tb_upgrade in self._task_bundle_upgrades.values():
+
+        def _resolve(tb_upgrade: TaskBundleUpgrade) -> None:
             for tb_migration in self._resolve_migrations_for_an_upgrade(tb_upgrade):
                 tb_upgrade.migrations.append(tb_migration)
             # Quay.io lists tags from the newest to the oldest one.
             # Migrations must be applied in the reverse order.
             tb_upgrade.migrations.reverse()
+
+        with ThreadPoolExecutor() as executor:
+            futures = [
+                executor.submit(_resolve, tb_upgrade)
+                for tb_upgrade in self._task_bundle_upgrades.values()
+            ]
+            for future in as_completed(futures):
+                future.result()
 
     @staticmethod
     def _apply_migration(pipeline_file: FilePath, migration: TaskBundleMigration) -> None:

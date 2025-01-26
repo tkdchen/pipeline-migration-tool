@@ -61,11 +61,20 @@ class Container(OrasContainer):
         return uri
 
 
+class AnonymousBackend:
+    """Custom backend to avoid extra HTTP requests by oras to request token"""
+
+
 class Registry(OrasRegistry):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._cache = FileBasedCache()
+
+        # oras determines backend type by checking the type of self.auth.
+        # Replace self.auth with the custom backend to avoid setting any
+        # authentication data in the header.
+        self.auth = AnonymousBackend()
 
     @staticmethod
     def _container_key(c: Container, digest: str | None = None) -> str:

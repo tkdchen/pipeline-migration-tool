@@ -4,6 +4,7 @@ import re
 import subprocess as sp
 import tempfile
 
+from abc import ABC, abstractmethod
 from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
@@ -18,6 +19,7 @@ from pipeline_migration.types import FilePath
 
 ANNOTATION_HAS_MIGRATION: Final[str] = "dev.konflux-ci.task.has-migration"
 ANNOTATION_IS_MIGRATION: Final[str] = "dev.konflux-ci.task.is-migration"
+ANNOTATION_PREVIOUS_MIGRATION_BUNDLE: Final[str] = "dev.konflux-ci.task.previous-migration-bundle"
 
 TEKTON_KIND_PIPELINE: Final = "Pipeline"
 TEKTON_KIND_PIPELINE_RUN: Final = "PipelineRun"
@@ -188,7 +190,7 @@ def determine_task_bundle_upgrades_range(
 
 class TaskBundleUpgradesManager:
 
-    def __init__(self, upgrades: list[dict[str, Any]]) -> None:
+    def __init__(self, upgrades: list[dict[str, Any]], resolver_class: type["Resolver"]) -> None:
         # Deduplicated task bundle upgrades. Key is the full bundle image with tag and digest.
         self._task_bundle_upgrades: dict[str, TaskBundleUpgrade] = {}
 
@@ -196,6 +198,8 @@ class TaskBundleUpgradesManager:
         # One package file may have the more than one task bundle upgrades, that reference the
         # objects in the ``_task_bundle_upgrades``.
         self._package_file_updates: dict[str, PackageFile] = {}
+
+        self._resolver = resolver_class()
 
         self._collect(upgrades)
 
@@ -242,42 +246,9 @@ class TaskBundleUpgradesManager:
                 pf = package_file
             pf.task_bundle_upgrades.append(tb_update)
 
-    @staticmethod
-    def _resolve_migrations_for_an_upgrade(
-        task_bundle_upgrade: TaskBundleUpgrade,
-    ) -> Generator[TaskBundleMigration, Any, None]:
-        upgrades_range = determine_task_bundle_upgrades_range(task_bundle_upgrade)
-        for tag_info in upgrades_range:
-            c = Container(task_bundle_upgrade.dep_name)
-            c.tag = tag_info.name
-            c.digest = tag_info.manifest_digest
-            uri_with_tag = c.uri_with_tag
-            script_content = fetch_migration_file(
-                task_bundle_upgrade.dep_name, tag_info.manifest_digest
-            )
-            if script_content:
-                logger.info("Task bundle %s has migration.", uri_with_tag)
-                yield TaskBundleMigration(task_bundle=uri_with_tag, migration_script=script_content)
-            else:
-                logger.info("Task bundle %s does not have migration.", uri_with_tag)
-
     def resolve_migrations(self) -> None:
         """Resolve migrations for given task bundle upgrades"""
-
-        def _resolve(tb_upgrade: TaskBundleUpgrade) -> None:
-            for tb_migration in self._resolve_migrations_for_an_upgrade(tb_upgrade):
-                tb_upgrade.migrations.append(tb_migration)
-            # Quay.io lists tags from the newest to the oldest one.
-            # Migrations must be applied in the reverse order.
-            tb_upgrade.migrations.reverse()
-
-        with ThreadPoolExecutor() as executor:
-            futures = [
-                executor.submit(_resolve, tb_upgrade)
-                for tb_upgrade in self._task_bundle_upgrades.values()
-            ]
-            for future in as_completed(futures):
-                future.result()
+        self._resolver.resolve(list(self._task_bundle_upgrades.values()))
 
     @staticmethod
     def _apply_migration(pipeline_file: FilePath, migration: TaskBundleMigration) -> None:
@@ -334,11 +305,6 @@ def fetch_migration_file(image: str, digest: str) -> str | None:
     c.digest = digest
     registry = Registry()
 
-    manifest = registry.get_manifest(c)
-    has_migration = "true" == manifest.get("annotations", {}).get(ANNOTATION_HAS_MIGRATION, "false")
-    if not has_migration:
-        return None
-
     # query and fetch migration file via referrers API
     image_index = ImageIndex(data=registry.list_referrers(c, "text/x-shellscript"))
     descriptors = [
@@ -361,12 +327,108 @@ def fetch_migration_file(image: str, digest: str) -> str | None:
     return None
 
 
-def migrate(upgrades: list[dict[str, Any]]) -> None:
+def migrate(upgrades: list[dict[str, Any]], migration_resolver: type["Resolver"]) -> None:
     """The core method doing the migrations
 
     :param upgrades: upgrades data, that follows the schema of Renovate template field ``upgrades``.
     :type upgrades: list[dict[str, any]]
     """
-    manager = TaskBundleUpgradesManager(upgrades)
+    manager = TaskBundleUpgradesManager(upgrades, migration_resolver)
     manager.resolve_migrations()
     manager.apply_migrations()
+
+
+class Resolver(ABC):
+    """Base class for resolving migrations"""
+
+    @abstractmethod
+    def _resolve_migrations(
+        self, dep_name: str, upgrades_range: list[QuayTagInfo]
+    ) -> Generator[TaskBundleMigration, Any, None]:
+        raise NotImplementedError
+
+    def resolve(self, tb_upgrades: list[TaskBundleUpgrade]) -> None:
+
+        def _resolve(tb_upgrade: TaskBundleUpgrade) -> None:
+            upgrades_range = determine_task_bundle_upgrades_range(tb_upgrade)
+            for tb_migration in self._resolve_migrations(tb_upgrade.dep_name, upgrades_range):
+                tb_upgrade.migrations.append(tb_migration)
+            # Quay.io lists tags from the newest to the oldest one.
+            # Migrations must be applied in the reverse order.
+            tb_upgrade.migrations.reverse()
+
+        with ThreadPoolExecutor() as executor:
+            futures = [executor.submit(_resolve, tb_upgrade) for tb_upgrade in tb_upgrades]
+            for future in as_completed(futures):
+                future.result()
+
+
+class SimpleIterationResolver(Resolver):
+    """Legacy resolution by checking individual task bundle within an upgrade"""
+
+    def _resolve_migrations(
+        self, dep_name: str, upgrades_range: list[QuayTagInfo]
+    ) -> Generator[TaskBundleMigration, Any, None]:
+        for tag_info in upgrades_range:
+            c = Container(f"{dep_name}:{tag_info.name}@{tag_info.manifest_digest}")
+            uri_with_tag = c.uri_with_tag
+
+            manifest_json = Registry().get_manifest(c)
+            if not is_true(
+                manifest_json.get("annotations", {}).get(ANNOTATION_HAS_MIGRATION, "false")
+            ):
+                continue
+
+            script_content = fetch_migration_file(dep_name, tag_info.manifest_digest)
+            if script_content:
+                logger.info("Task bundle %s has migration.", uri_with_tag)
+                yield TaskBundleMigration(task_bundle=uri_with_tag, migration_script=script_content)
+            else:
+                logger.info("Task bundle %s does not have migration.", uri_with_tag)
+
+
+class LinkedMigrationsResolver(Resolver):
+    """Resolve linked migrations via bundle image annotation"""
+
+    def _resolve_migrations(
+        self, dep_name: str, upgrades_range: list[QuayTagInfo]
+    ) -> Generator[TaskBundleMigration, Any, None]:
+        manifest_digests = [tag.manifest_digest for tag in upgrades_range]
+        i = 0
+        while True:
+            tag_info = upgrades_range[i]
+            c = Container(f"{dep_name}:{tag_info.name}@{tag_info.manifest_digest}")
+            uri_with_tag = c.uri_with_tag
+
+            manifest_json = Registry().get_manifest(c)
+            has_migration = manifest_json.get("annotations", {}).get(
+                ANNOTATION_HAS_MIGRATION, "false"
+            )
+
+            if is_true(has_migration):
+                script_content = fetch_migration_file(dep_name, tag_info.manifest_digest)
+                if script_content:
+                    logger.info("Task bundle %s has migration.", uri_with_tag)
+                    yield TaskBundleMigration(
+                        task_bundle=uri_with_tag, migration_script=script_content
+                    )
+                else:
+                    logger.info("Task bundle %s does not have migration.", uri_with_tag)
+
+            digest = manifest_json.get("annotations", {}).get(
+                ANNOTATION_PREVIOUS_MIGRATION_BUNDLE, ""
+            )
+            if digest:
+                try:
+                    i = manifest_digests.index(digest)
+                except ValueError:
+                    logger.info(
+                        "Migration search stops at %s. It points to a previous migration bundle %s "
+                        "that is before the current upgrade.",
+                        c.uri_with_tag,
+                        digest,
+                    )
+                    break
+            else:
+                logger.info("Migration search stops at %s", c.uri_with_tag)
+                break

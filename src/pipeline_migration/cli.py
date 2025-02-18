@@ -9,7 +9,12 @@ from jsonschema.exceptions import ValidationError
 from jsonschema.validators import Draft202012Validator
 
 from pipeline_migration.cache import CACHE_DIR_PREFIX, FileBasedCache
-from pipeline_migration.migrate import InvalidRenovateUpgradesData, migrate
+from pipeline_migration.migrate import (
+    InvalidRenovateUpgradesData,
+    migrate,
+    SimpleIterationResolver,
+    LinkedMigrationsResolver,
+)
 
 logging.basicConfig(level=logging.DEBUG, format="%(levelname)s:%(asctime)s:%(name)s:%(message)s")
 logger = logging.getLogger("cli")
@@ -94,6 +99,12 @@ def main() -> None:
     parser.add_argument(
         "-d", "--cache-dir", metavar="PATH", help="Path to the existing cache directory."
     )
+    parser.add_argument(
+        "-l",
+        "--use-legacy-resolver",
+        action="store_true",
+        help="Use legacy resolver to fetch migrations.",
+    )
 
     args = parser.parse_args()
 
@@ -102,7 +113,11 @@ def main() -> None:
         os.makedirs(cache_dir, exist_ok=True)
     FileBasedCache.configure(cache_dir=cache_dir)
 
-    migrate(validate_upgrades(args.renovate_upgrades))
+    if args.use_legacy_resolver:
+        resolver_class = SimpleIterationResolver
+    else:
+        resolver_class = LinkedMigrationsResolver
+    migrate(validate_upgrades(args.renovate_upgrades), resolver_class)
 
 
 def entry_point():

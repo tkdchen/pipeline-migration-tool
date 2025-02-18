@@ -8,3 +8,6 @@ __pycache__/
 .tox/
 .idea/
 local-tests/
+htmlcov/
+.mypy_cache/
+.pytest_cache/

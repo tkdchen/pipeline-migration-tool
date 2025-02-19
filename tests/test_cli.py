@@ -11,7 +11,7 @@ from oras.types import container_type
 
 from pipeline_migration.cache import CACHE_DIR_PREFIX, FileBasedCache
 from pipeline_migration.cli import entry_point
-from pipeline_migration.migrate import MIGRATION_ANNOTATION
+from pipeline_migration.migrate import ANNOTATION_HAS_MIGRATION
 from pipeline_migration.registry import (
     Container,
     MEDIA_TYPE_OCI_EMTPY_V1,
@@ -78,7 +78,7 @@ task_bundle_clone_test_data = ImageTestData(
                 "size": 10,
             },
             "layers": [],
-            "annotations": {MIGRATION_ANNOTATION: "true"},
+            "annotations": {ANNOTATION_HAS_MIGRATION: "true"},
         },
         "sha256:f23dc7cd74ba": {
             "schemaVersion": 2,
@@ -89,7 +89,7 @@ task_bundle_clone_test_data = ImageTestData(
                 "size": 11,
             },
             "layers": [],
-            "annotations": {MIGRATION_ANNOTATION: "true"},
+            "annotations": {ANNOTATION_HAS_MIGRATION: "true"},
         },
         "sha256:492fb9ae4e7e": {
             "schemaVersion": 2,

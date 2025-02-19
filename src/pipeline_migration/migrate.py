@@ -16,8 +16,8 @@ from pipeline_migration.quay import QuayTagInfo, list_active_repo_tags
 from pipeline_migration.utils import is_true
 from pipeline_migration.types import FilePath
 
-# TODO: once the build-and-push.sh is done, correct this name if necessary
-MIGRATION_ANNOTATION: Final[str] = "dev.konflux-ci.task.migration"
+ANNOTATION_HAS_MIGRATION: Final[str] = "dev.konflux-ci.task.has-migration"
+ANNOTATION_IS_MIGRATION: Final[str] = "dev.konflux-ci.task.is-migration"
 
 TEKTON_KIND_PIPELINE: Final = "Pipeline"
 TEKTON_KIND_PIPELINE_RUN: Final = "PipelineRun"
@@ -335,7 +335,7 @@ def fetch_migration_file(image: str, digest: str) -> str | None:
     registry = Registry()
 
     manifest = registry.get_manifest(c)
-    has_migration = "true" == manifest.get("annotations", {}).get(MIGRATION_ANNOTATION, "false")
+    has_migration = "true" == manifest.get("annotations", {}).get(ANNOTATION_HAS_MIGRATION, "false")
     if not has_migration:
         return None
 
@@ -344,7 +344,7 @@ def fetch_migration_file(image: str, digest: str) -> str | None:
     descriptors = [
         descriptor
         for descriptor in image_index.manifests
-        if is_true(descriptor.annotations.get(MIGRATION_ANNOTATION, "false"))
+        if is_true(descriptor.annotations.get(ANNOTATION_IS_MIGRATION, "false"))
     ]
     if len(descriptors) > 1:
         msg = (

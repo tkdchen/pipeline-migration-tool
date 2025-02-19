@@ -10,12 +10,13 @@ import responses
 import pytest
 
 from pipeline_migration.migrate import (
+    ANNOTATION_HAS_MIGRATION,
+    ANNOTATION_IS_MIGRATION,
     ANNOTATION_TRUTH_VALUE,
     determine_task_bundle_upgrades_range,
     fetch_migration_file,
     IncorrectMigrationAttachment,
     InvalidRenovateUpgradesData,
-    MIGRATION_ANNOTATION,
     resolve_pipeline,
     TaskBundleMigration,
     TaskBundleUpgrade,
@@ -503,7 +504,7 @@ class TestFetchMigrationFile:
     def test_no_referrer_with_expected_artifact_type(self, image_manifest):
         c = Container(APP_IMAGE_REPO)
         c.digest = self.image_digest
-        image_manifest["annotations"] = {MIGRATION_ANNOTATION: ANNOTATION_TRUTH_VALUE}
+        image_manifest["annotations"] = {ANNOTATION_HAS_MIGRATION: ANNOTATION_TRUTH_VALUE}
         responses.get(f"https://{c.manifest_url()}", json=image_manifest)
 
         referrers = []  # No referrer
@@ -519,7 +520,7 @@ class TestFetchMigrationFile:
     def test_no_referrer_with_migration_annotation(self, oci_referrer_descriptor, image_manifest):
         c = Container(APP_IMAGE_REPO)
         c.digest = self.image_digest
-        image_manifest["annotations"] = {MIGRATION_ANNOTATION: ANNOTATION_TRUTH_VALUE}
+        image_manifest["annotations"] = {ANNOTATION_HAS_MIGRATION: ANNOTATION_TRUTH_VALUE}
         responses.get(f"https://{c.manifest_url()}", json=image_manifest)
 
         oci_referrer_descriptor["annotations"] = {}
@@ -537,13 +538,13 @@ class TestFetchMigrationFile:
     ):
         c = Container(APP_IMAGE_REPO)
         c.digest = self.image_digest
-        image_manifest["annotations"] = {MIGRATION_ANNOTATION: ANNOTATION_TRUTH_VALUE}
+        image_manifest["annotations"] = {ANNOTATION_HAS_MIGRATION: ANNOTATION_TRUTH_VALUE}
         responses.get(f"https://{c.manifest_url()}", json=image_manifest)
 
         referrers = []
         for _ in range(3):
             referrer = deepcopy(oci_referrer_descriptor)
-            referrer["annotations"] = {MIGRATION_ANNOTATION: ANNOTATION_TRUTH_VALUE}
+            referrer["annotations"] = {ANNOTATION_IS_MIGRATION: ANNOTATION_TRUTH_VALUE}
             referrers.append(referrer)
 
         responses.get(
@@ -559,11 +560,11 @@ class TestFetchMigrationFile:
         c = Container(APP_IMAGE_REPO)
         c.digest = self.image_digest
         bundle_manifest = deepcopy(image_manifest)
-        bundle_manifest["annotations"] = {MIGRATION_ANNOTATION: ANNOTATION_TRUTH_VALUE}
+        bundle_manifest["annotations"] = {ANNOTATION_HAS_MIGRATION: ANNOTATION_TRUTH_VALUE}
         responses.get(f"https://{c.manifest_url()}", json=bundle_manifest)
 
         # mock there is a referrer with specific artifactType and annotation
-        oci_referrer_descriptor["annotations"] = {MIGRATION_ANNOTATION: ANNOTATION_TRUTH_VALUE}
+        oci_referrer_descriptor["annotations"] = {ANNOTATION_IS_MIGRATION: ANNOTATION_TRUTH_VALUE}
         image_index = {
             "schemaVersion": 2,
             "manifests": [oci_referrer_descriptor],

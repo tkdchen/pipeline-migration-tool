@@ -4,7 +4,6 @@ from typing import Final
 
 import responses
 
-from pipeline_migration.cache import FileBasedCache
 from pipeline_migration.types import DescriptorT, ManifestT
 from pipeline_migration.registry import (
     Container,
@@ -19,20 +18,6 @@ from pipeline_migration.migrate import (
     ANNOTATION_TRUTH_VALUE,
 )
 from tests.utils import generate_digest
-
-
-@pytest.fixture()
-def file_based_cache(tmp_path) -> FileBasedCache:
-    """Configure cache and return an instance of it"""
-    FileBasedCache.configure(cache_dir=str(tmp_path))
-    return FileBasedCache()
-
-
-@pytest.fixture
-def disable_file_based_cache(monkeypatch, tmp_path) -> FileBasedCache:
-    monkeypatch.setitem(FileBasedCache.config, "cache_dir", str(tmp_path))
-    monkeypatch.setitem(FileBasedCache.config, "disabled", "True")
-    return FileBasedCache()
 
 
 @pytest.fixture

@@ -1,5 +1,4 @@
 import copy
-import json
 import pytest
 import responses
 
@@ -71,7 +70,7 @@ def test_image_index_get_manifest() -> None:
 
 class TestListReferrers:
 
-    def test_fail_missing_digest(self, file_based_cache):
+    def test_fail_missing_digest(self):
         c = Container("reg.io/ns/app:0.1")
         with pytest.raises(ValueError, match="Missing digest"):
             Registry().list_referrers(c)
@@ -93,13 +92,12 @@ class TestListReferrers:
         return mock_resp
 
     @responses.activate
-    def test_list_referrers(self, disable_file_based_cache):
+    def test_list_referrers(self):
         mock_resp = self._make_list_request(2)
         assert mock_resp.call_count == 2
-        assert not list(disable_file_based_cache.path.iterdir())
 
     @responses.activate
-    def test_list_referrers_by_artifact_type(self, disable_file_based_cache):
+    def test_list_referrers_by_artifact_type(self):
         digest = generate_digest()
         c = Container(f"reg.io/ns/app@{digest}")
         expected_image_index = copy.deepcopy(IMAGE_INDEX)
@@ -111,7 +109,7 @@ class TestListReferrers:
         assert image_index["manifests"] == [REFERRER_DESCRIPTOR.copy()]
 
     @responses.activate
-    def test_ensure_error_response_is_handled(self, monkeypatch, caplog, disable_file_based_cache):
+    def test_ensure_error_response_is_handled(self, monkeypatch, caplog):
         monkeypatch.setattr("time.sleep", lambda n: n)  # make oras retry not sleep
         digest = generate_digest()
         c = Container(f"reg.io/ns/app@{digest}")
@@ -121,77 +119,20 @@ class TestListReferrers:
             Registry().list_referrers(c)
         assert "something is wrong" in caplog.text
 
-    @responses.activate
-    def test_list_referrers_with_cache(self, file_based_cache):
-        mock_resp = self._make_list_request(3)
-        assert mock_resp.call_count == 1
-        files = list(file_based_cache.path.iterdir())
-        assert len(files) == 1
-        expected_image_index = copy.deepcopy(IMAGE_INDEX)
-        expected_image_index["manifests"].extend(
-            [
-                REFERRER_DESCRIPTOR.copy(),
-                REFERRER_DESCRIPTOR.copy(),
-                REFERRER_DESCRIPTOR.copy(),
-            ],
-        )
-        assert json.loads(files[0].read_text()) == expected_image_index
+
+@responses.activate
+def test_get_manifest(image_manifest):
+    image_digest = generate_digest()
+    c = Container(f"reg.io/ns/app@{image_digest}")
+    responses.get(f"https://{c.manifest_url()}", json=image_manifest)
+    assert Registry().get_manifest(c) == image_manifest
 
 
-class TestRegistryGetManifest:
-
-    def _make_get_manifest_requests(self, expected_image_manifest: dict, count: int):
-        image_digest = generate_digest()
-        c = Container(f"reg.io/ns/app@{image_digest}")
-        mock_resp = responses.get(f"https://{c.manifest_url()}", json=expected_image_manifest)
-        for _ in range(count):
-            assert Registry().get_manifest(c) == expected_image_manifest
-        return mock_resp
-
-    @responses.activate
-    def test_get_with_cache(self, file_based_cache, image_manifest):
-        mock_resp = self._make_get_manifest_requests(image_manifest, 2)
-        assert mock_resp.call_count == 1
-        # Verify image manifest is cached
-        files = list(file_based_cache.path.iterdir())
-        assert len(files) == 1
-        assert json.loads(files[0].read_text()) == image_manifest
-
-    @responses.activate
-    def test_get_without_cache(self, image_manifest, disable_file_based_cache):
-        mock_resp = self._make_get_manifest_requests(image_manifest, 3)
-        assert mock_resp.call_count == 3
-        # Verify image manifest is cached
-        assert not list(disable_file_based_cache.path.iterdir())
-
-
-class TestRegistryGetArtifact:
-
+@responses.activate
+def test_get_artifact():
     expected_content = "echo hello world"
-
-    def _make_get_artifact_requests(self, count: int):
-        image_digest = generate_digest()
-        c = Container("reg.io/ns/app")
-        mock_resp = responses.get(
-            f"https://{c.get_blob_url(image_digest)}",
-            body=self.expected_content.encode("utf-8"),
-        )
-        for _ in range(count):
-            content = Registry().get_artifact(c, image_digest)
-            assert content == self.expected_content
-        return mock_resp
-
-    @responses.activate
-    def test_get_with_cache(self, file_based_cache):
-        mock_resp = self._make_get_artifact_requests(10)
-        assert mock_resp.call_count == 1
-        files = list(file_based_cache.path.iterdir())
-        assert len(files) == 1
-        assert files[0].read_text() == self.expected_content
-
-    @responses.activate
-    def test_get_without_cache(self, disable_file_based_cache):
-        expected_call_count = 4
-        mock_resp = self._make_get_artifact_requests(expected_call_count)
-        assert mock_resp.call_count == expected_call_count
-        assert not list(disable_file_based_cache.path.iterdir())
+    image_digest = generate_digest()
+    c = Container("reg.io/ns/app")
+    responses.get(f"https://{c.get_blob_url(image_digest)}", body=expected_content.encode("utf-8"))
+    content = Registry().get_artifact(c, image_digest)
+    assert content == expected_content

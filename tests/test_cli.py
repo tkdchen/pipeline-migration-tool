@@ -11,7 +11,10 @@ from oras.types import container_type
 
 from pipeline_migration.cache import CACHE_DIR_PREFIX, FileBasedCache
 from pipeline_migration.cli import entry_point
-from pipeline_migration.migrate import ANNOTATION_HAS_MIGRATION
+from pipeline_migration.migrate import (
+    ANNOTATION_HAS_MIGRATION,
+    ANNOTATION_PREVIOUS_MIGRATION_BUNDLE,
+)
 from pipeline_migration.registry import (
     Container,
     MEDIA_TYPE_OCI_EMTPY_V1,
@@ -44,13 +47,13 @@ class TestConfigureCacheDir:
 
     def test_set_from_command_line(self, monkeypatch, tmp_path):
         monkeypatch.setattr("sys.argv", ["mt", "-u", json.dumps(UPGRADES), "-d", str(tmp_path)])
-        monkeypatch.setattr("pipeline_migration.cli.migrate", lambda arg: 1)
+        monkeypatch.setattr("pipeline_migration.cli.migrate", lambda arg, klass: 1)
         assert entry_point() is None
         assert FileBasedCache.config["cache_dir"] == str(tmp_path)
 
     def test_fallback_to_a_temporary_dir(self, monkeypatch):
         monkeypatch.setattr("sys.argv", ["mt", "-u", json.dumps(UPGRADES)])
-        monkeypatch.setattr("pipeline_migration.cli.migrate", lambda arg: 1)
+        monkeypatch.setattr("pipeline_migration.cli.migrate", lambda arg, klass: 1)
         assert entry_point() is None
         cache_dir = FileBasedCache.config["cache_dir"]
         assert os.path.isdir(cache_dir)
@@ -242,7 +245,8 @@ class TestMigrateSingleTaskBundleUpgrade:
         return pipeline_file
 
     @responses.activate
-    def test_apply_migrations_for_single_upgrade(self, monkeypatch, tmp_path):
+    @pytest.mark.parametrize("use_linked_migrations", [True, False])
+    def test_apply_migrations(self, use_linked_migrations, monkeypatch, tmp_path):
         monkeypatch.setattr("pipeline_migration.migrate.Registry", MockRegistry)
         self._mock_quay_list_tags()
 
@@ -276,6 +280,18 @@ class TestMigrateSingleTaskBundleUpgrade:
         monkeypatch.chdir(tmp_path)
 
         cli_cmd = ["pmt", "-u", json.dumps(tb_upgrades)]
+
+        if use_linked_migrations:
+            test_data = MockRegistry.test_data[0]
+            # Set annotation to link bundles that have migration
+            annotations = test_data.manifests["sha256:c4bb69a3a08f"]["annotations"]
+            annotations[ANNOTATION_PREVIOUS_MIGRATION_BUNDLE] = "sha256:f23dc7cd74ba"
+            annotations = test_data.manifests["sha256:f23dc7cd74ba"]["annotations"]
+            annotations[ANNOTATION_PREVIOUS_MIGRATION_BUNDLE] = ""
+            # Nothing change to the CLI command. Linked migrations are used by default.
+        else:
+            cli_cmd.append("--use-legacy-resolver")
+
         monkeypatch.setattr("sys.argv", cli_cmd)
 
         migration_steps = [
@@ -297,7 +313,7 @@ class TestMigrateSingleTaskBundleUpgrade:
 
 
 def test_entry_point_should_catch_error(monkeypatch, caplog):
-    cli_cmd = ["pmt", "-u", json.dumps(UPGRADES)]
+    cli_cmd = ["pmt", "--use-legacy-resolver", "-u", json.dumps(UPGRADES)]
     monkeypatch.setattr("sys.argv", cli_cmd)
     assert entry_point() == 1
     assert "Cannot do migration for pipeline." in caplog.text
@@ -366,3 +382,7 @@ def test_ensure_cache_dir_is_created(tmp_path, monkeypatch):
     monkeypatch.setattr("sys.argv", cli_cmd)
     entry_point()
     assert cache_dir.exists()
+
+
+class TestBundleUpgradeByLinkedMigration:
+    """Test applying migration by checking linked migration"""

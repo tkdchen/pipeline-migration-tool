@@ -9,10 +9,12 @@ from typing import Any, Final
 import responses
 import pytest
 
+from pipeline_migration.cache import FileBasedCache
 from pipeline_migration.migrate import (
     ANNOTATION_HAS_MIGRATION,
     ANNOTATION_IS_MIGRATION,
     ANNOTATION_TRUTH_VALUE,
+    LinkedMigrationsResolver,
     determine_task_bundle_upgrades_range,
     fetch_migration_file,
     IncorrectMigrationAttachment,
@@ -21,6 +23,7 @@ from pipeline_migration.migrate import (
     TaskBundleMigration,
     TaskBundleUpgrade,
     TaskBundleUpgradesManager,
+    SimpleIterationResolver,
 )
 from pipeline_migration.quay import QuayTagInfo
 from pipeline_migration.registry import Container
@@ -447,7 +450,7 @@ class TestTaskBundleUpgradesManagerCollectUpgrades:
         self.test_upgrades = deepcopy(RENOVATE_UPGRADES)
 
     def test_collect_upgrades(self):
-        manager = TaskBundleUpgradesManager(self.test_upgrades)
+        manager = TaskBundleUpgradesManager(self.test_upgrades, SimpleIterationResolver)
         assert len(manager._task_bundle_upgrades) == 3
 
     def test_skip_non_konflux_bundles(self):
@@ -463,7 +466,7 @@ class TestTaskBundleUpgradesManagerCollectUpgrades:
         ]
         upgrade[0]["depName"] = APP_IMAGE_REPO
 
-        manager = TaskBundleUpgradesManager(self.test_upgrades)
+        manager = TaskBundleUpgradesManager(self.test_upgrades, SimpleIterationResolver)
         package_files = [
             package_file
             for package_file in manager.package_files
@@ -476,7 +479,7 @@ class TestTaskBundleUpgradesManagerCollectUpgrades:
             if upgrade["packageFile"].endswith("push.yaml"):
                 upgrade["depTypes"] = ["some-other-renovate-manager"]
 
-        manager = TaskBundleUpgradesManager(self.test_upgrades)
+        manager = TaskBundleUpgradesManager(self.test_upgrades, SimpleIterationResolver)
         package_files = set([upgrade["packageFile"] for upgrade in self.test_upgrades])
         assert len(package_files) > len(manager._package_file_updates)
 
@@ -489,16 +492,6 @@ class TestFetchMigrationFile:
     def test_fail_if_image_has_tag_or_digest(self):
         with pytest.raises(ValueError, match="should not include digest"):
             fetch_migration_file(f"{APP_IMAGE_REPO}@{self.image_digest}", self.image_digest)
-
-    @responses.activate
-    def test_task_bundle_has_no_migration_annotation(self, image_manifest):
-        c = Container(APP_IMAGE_REPO)
-        c.digest = self.image_digest
-        image_manifest["annotations"] = {}  # clear explicitly
-        responses.get(f"https://{c.manifest_url()}", json=image_manifest)
-
-        r = fetch_migration_file(APP_IMAGE_REPO, self.image_digest)
-        assert r is None
 
     @responses.activate
     def test_no_referrer_with_expected_artifact_type(self, image_manifest):
@@ -556,34 +549,16 @@ class TestFetchMigrationFile:
             fetch_migration_file(APP_IMAGE_REPO, self.image_digest)
 
     @responses.activate
-    def test_migration_file_is_fetched(self, oci_referrer_descriptor, image_manifest) -> None:
+    def test_migration_file_is_fetched(
+        self, mock_fetch_migration, oci_referrer_descriptor, image_manifest
+    ) -> None:
         c = Container(APP_IMAGE_REPO)
         c.digest = self.image_digest
         bundle_manifest = deepcopy(image_manifest)
         bundle_manifest["annotations"] = {ANNOTATION_HAS_MIGRATION: ANNOTATION_TRUTH_VALUE}
         responses.get(f"https://{c.manifest_url()}", json=bundle_manifest)
 
-        # mock there is a referrer with specific artifactType and annotation
-        oci_referrer_descriptor["annotations"] = {ANNOTATION_IS_MIGRATION: ANNOTATION_TRUTH_VALUE}
-        image_index = {
-            "schemaVersion": 2,
-            "manifests": [oci_referrer_descriptor],
-            "annotations": {},
-        }
-        responses.get(
-            f"https://{c.referrers_url}?artifactType=text/x-shellscript", json=image_index
-        )
-
-        layer_digest: Final = generate_digest()
-
-        # mock getting referrer image manifest
-        referrer_manifest = deepcopy(image_manifest)
-        referrer_manifest["layers"][0]["digest"] = layer_digest
-        c.digest = oci_referrer_descriptor["digest"]
-        responses.get(f"https://{c.manifest_url()}", json=referrer_manifest)
-
-        # mock getting referrer's layer blob, i.e. the content
-        responses.get(f"https://{c.get_blob_url(layer_digest)}", body=b"echo hello world")
+        mock_fetch_migration(c, b"echo hello world")
 
         r = fetch_migration_file(APP_IMAGE_REPO, self.image_digest)
         assert r == "echo hello world"
@@ -594,7 +569,7 @@ class TestResolveMigrations:
     @responses.activate
     def test_no_tag_is_listed_by_registry(self) -> None:
         renovate_upgrades = deepcopy(RENOVATE_UPGRADES)[:1]
-        manager = TaskBundleUpgradesManager(renovate_upgrades)
+        manager = TaskBundleUpgradesManager(renovate_upgrades, SimpleIterationResolver)
         tb_upgrade = list(manager._task_bundle_upgrades.items())[0][1]
 
         c = Container(tb_upgrade.dep_name)
@@ -607,9 +582,9 @@ class TestResolveMigrations:
         assert len(tb_upgrade.migrations) == 0
 
     @responses.activate
-    def test_migrations_are_resolved(self, monkeypatch) -> None:
+    def test_migrations_are_resolved(self, mock_get_manifest, monkeypatch) -> None:
         renovate_upgrades = deepcopy(RENOVATE_UPGRADES)[:1]
-        manager = TaskBundleUpgradesManager(renovate_upgrades)
+        manager = TaskBundleUpgradesManager(renovate_upgrades, SimpleIterationResolver)
 
         # THIS. Fetch migrations for this upgrade
         tb_upgrade: Final = list(manager._task_bundle_upgrades.items())[0][1]
@@ -643,10 +618,20 @@ class TestResolveMigrations:
             json={"tags": tags_info, "page": 1, "has_additional": False},
         )
 
+        for tag in tags_info:
+            c = Container(tb_upgrade.dep_name)
+            c.digest = tag["manifest_digest"]
+            has_migration = c.digest in digests_of_images_having_migration
+            mock_get_manifest(c, has_migration=has_migration)
+
         script_content: Final = "echo add a new task to pipeline"
 
         def _fetch_migration_file(image: str, digest: str) -> str | None:
-            return script_content if digest in digests_of_images_having_migration else None
+            assert digest in digests_of_images_having_migration, (
+                f"Bundle with digest {digest} does not have a migration, "
+                "fetch_migration_file should not be called."
+            )
+            return script_content
 
         monkeypatch.setattr(
             "pipeline_migration.migrate.fetch_migration_file", _fetch_migration_file
@@ -730,7 +715,7 @@ class TestApplyMigrations:
         pipeline_file.write_text(PIPELINE_DEFINITION)
 
         renovate_upgrades = deepcopy(RENOVATE_UPGRADES)
-        manager = TaskBundleUpgradesManager(renovate_upgrades)
+        manager = TaskBundleUpgradesManager(renovate_upgrades, SimpleIterationResolver)
 
         tb_migration = TaskBundleMigration("task-bundle:0.3@sha256:1234", migration_script)
         if chdir:
@@ -761,7 +746,7 @@ class TestApplyMigrations:
                 "parentDir": ".tekton",
             },
         ]
-        manager = TaskBundleUpgradesManager(renovate_upgrades)
+        manager = TaskBundleUpgradesManager(renovate_upgrades, SimpleIterationResolver)
 
         # Not really resolve migrations. Mock them instead, then apply.
         tb_upgrade = list(manager._task_bundle_upgrades.values())[0]
@@ -830,8 +815,135 @@ class TestApplyMigrations:
         pipeline_file: Final = tmp_path / "pipeline.yaml"
         pipeline_file.write_text("kind: Pipeline")
 
-        manager = TaskBundleUpgradesManager(deepcopy(RENOVATE_UPGRADES))
+        manager = TaskBundleUpgradesManager(deepcopy(RENOVATE_UPGRADES), SimpleIterationResolver)
         tb_migration = TaskBundleMigration("task-bundle:0.3@sha256:1234", "echo remove a param")
         with pytest.raises(subprocess.CalledProcessError):
             manager._apply_migration(pipeline_file, tb_migration)
         assert "something is wrong" in caplog.text
+
+
+class TestLinkedMigrationsResolver:
+
+    @responses.activate
+    @pytest.mark.parametrize(
+        "case_",
+        [
+            "bundle_doesnt_have_migration_link_info",
+            "no_previous_migration_yet",
+            "prevous_migrate_is_outside_of_upgrade",
+        ],
+    )
+    def test_upgrade_doesnt_include_migration(
+        self, case_, image_manifest, mock_get_manifest, tmp_path, disable_cache
+    ):
+        # TODO: remove the cache
+        FileBasedCache.config["cache_dir"] = str(tmp_path)
+
+        tb_upgrade = TaskBundleUpgrade(
+            dep_name=APP_IMAGE_REPO,
+            current_value="0.1",
+            current_digest="sha256:bb6de65",
+            new_value="0.2",
+            new_digest="sha256:2a2c2b7",
+        )
+
+        c = Container(tb_upgrade.dep_name)
+        responses.add(
+            responses.GET,
+            f"https://{c.registry}/api/v1/repository/{c.namespace}/{c.repository}/tag/?"
+            "page=1&onlyActiveTags=true",
+            json={"tags": SAMPLE_TAGS_OF_NS_APP, "page": 1, "has_additional": False},
+        )
+
+        c = Container(f"{tb_upgrade.dep_name}@{tb_upgrade.new_digest}")
+        match case_:
+            case "bundle_doesnt_have_migration_link_info":
+                mock_get_manifest(c, has_migration=False, previous_migration_bundle=None)
+            case "no_previous_migration_yet":
+                mock_get_manifest(c, has_migration=False, previous_migration_bundle="")
+            case "prevous_migrate_is_outside_of_upgrade":
+                bundle_digeset = "sha256:69edfd6"  # The bundle digest is outside of the upgrade
+                mock_get_manifest(c, has_migration=False, previous_migration_bundle=bundle_digeset)
+
+        resolver = LinkedMigrationsResolver()
+        resolver.resolve([tb_upgrade])
+
+        assert len(tb_upgrade.migrations) == 0
+
+    @responses.activate
+    @pytest.mark.parametrize("case_", ["single", "multiple"])
+    def test_migration_is_resolved(
+        self,
+        case_,
+        image_manifest,
+        mock_fetch_migration,
+        mock_get_manifest,
+        tmp_path,
+        disable_cache,
+    ):
+        """Test an upgrade includes a single migration
+
+        Test data: upgrade has bundles: bundle1, bundle2 (M), bundle3.
+        bundle2 has a migration, and bundle3 points to bundle2 by annotation.
+        """
+        FileBasedCache.config["cache_dir"] = str(tmp_path)
+
+        tb_upgrade = TaskBundleUpgrade(
+            dep_name=APP_IMAGE_REPO,
+            current_value="0.1",
+            current_digest="sha256:bb6de65",
+            new_value="0.2",
+            new_digest="sha256:2a2c2b7",
+        )
+
+        c = Container(tb_upgrade.dep_name)
+        responses.add(
+            responses.GET,
+            f"https://{c.registry}/api/v1/repository/{c.namespace}/{c.repository}/tag/?"
+            "page=1&onlyActiveTags=true",
+            json={"tags": SAMPLE_TAGS_OF_NS_APP, "page": 1, "has_additional": False},
+        )
+
+        expected_migrations_count = 0
+
+        match case_:
+            case "single":
+                # bundle@new_digest --> bundle@sha256:9bfc6b9 (M)
+
+                migration_bundle_digest: Final = "sha256:9bfc6b9"
+
+                c = Container(f"{tb_upgrade.dep_name}@{tb_upgrade.new_digest}")
+                mock_get_manifest(
+                    c, has_migration=False, previous_migration_bundle=migration_bundle_digest
+                )
+
+                c = Container(f"{tb_upgrade.dep_name}@{migration_bundle_digest}")
+                # No more migration
+                mock_get_manifest(c, has_migration=True, previous_migration_bundle="")
+                mock_fetch_migration(c)
+
+                expected_migrations_count = 1
+
+            case "multiple":
+                # bundle@new_digest --> bundle@sha256:52f8b96 (M) --> bundle@sha256:7f8b549 (M)
+
+                c = Container(f"{tb_upgrade.dep_name}@{tb_upgrade.new_digest}")
+                mock_get_manifest(
+                    c, has_migration=False, previous_migration_bundle="sha256:52f8b96"
+                )
+
+                c = Container(f"{tb_upgrade.dep_name}@sha256:52f8b96")
+                mock_get_manifest(c, has_migration=True, previous_migration_bundle="sha256:7f8b549")
+                mock_fetch_migration(c)
+
+                c = Container(f"{tb_upgrade.dep_name}@sha256:7f8b549")
+                prev_bundle = ""  # no more migration
+                mock_get_manifest(c, has_migration=True, previous_migration_bundle=prev_bundle)
+                mock_fetch_migration(c)
+
+                expected_migrations_count = 2
+
+        resolver = LinkedMigrationsResolver()
+        resolver.resolve([tb_upgrade])
+
+        assert len(tb_upgrade.migrations) == expected_migrations_count

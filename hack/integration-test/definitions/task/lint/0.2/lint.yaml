@@ -1,0 +1,18 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: lint
+  labels:
+    app.kubernetes.io/version: "0.2"
+    build.appstudio.redhat.com/build_type: "docker"
+  annotations:
+    tekton.dev/pipelines.minVersion: "0.12.1"
+    dev.konflux-ci/updated-datetime: ""
+spec:
+  steps:
+  - name: lint
+    image: registry.fedoraproject.org/fedora-minimal:40
+    script: |
+      echo run linters
+  workspaces:
+  - name: source

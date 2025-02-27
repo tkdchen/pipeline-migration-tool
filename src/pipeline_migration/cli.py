@@ -1,14 +1,11 @@
 import argparse
 import json
 import logging
-import os.path
-import tempfile
 from typing import Any, Final
 
 from jsonschema.exceptions import ValidationError
 from jsonschema.validators import Draft202012Validator
 
-from pipeline_migration.cache import CACHE_DIR_PREFIX, FileBasedCache
 from pipeline_migration.migrate import (
     InvalidRenovateUpgradesData,
     migrate,
@@ -88,16 +85,12 @@ def validate_upgrades(raw_input: str) -> list[dict[str, Any]]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Pipeline migration tool for Konflux CI.")
-
     parser.add_argument(
         "-u",
         "--renovate-upgrades",
         required=True,
         metavar="JSON_STR",
         help="A JSON string converted from Renovate template field upgrades.",
-    )
-    parser.add_argument(
-        "-d", "--cache-dir", metavar="PATH", help="Path to the existing cache directory."
     )
     parser.add_argument(
         "-l",
@@ -107,11 +100,6 @@ def main() -> None:
     )
 
     args = parser.parse_args()
-
-    cache_dir = args.cache_dir or tempfile.mkdtemp(prefix=CACHE_DIR_PREFIX)
-    if not os.path.exists(cache_dir):
-        os.makedirs(cache_dir, exist_ok=True)
-    FileBasedCache.configure(cache_dir=cache_dir)
 
     if args.use_legacy_resolver:
         resolver_class = SimpleIterationResolver

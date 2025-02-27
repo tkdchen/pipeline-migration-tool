@@ -1,4 +1,3 @@
-import json
 from typing import Final
 import urllib.parse
 
@@ -10,7 +9,6 @@ from oras.decorator import ensure_container
 from oras.types import container_type
 from requests.models import Response as Response
 
-from pipeline_migration.cache import FileBasedCache
 from pipeline_migration.types import AnnotationsT, ImageIndexT, DescriptorT
 
 MEDIA_TYPE_OCI_EMTPY_V1: Final = "application/vnd.oci.empty.v1+json"
@@ -65,26 +63,6 @@ class Registry(OrasRegistry):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._cache = FileBasedCache()
-
-    @staticmethod
-    def _container_key(c: Container, digest: str | None = None) -> str:
-        d = digest or c.digest
-        # oras-py parses the image by making the extra path components of repo
-        # name be part of the namespace.
-        return f"{c.namespace.replace('/', '_')}-{c.repository}-{d}"
-
-    @ensure_container
-    def get_manifest(
-        self, container: container_type, allowed_media_type: list | None = None
-    ) -> dict:
-        key = f"manifest-{self._container_key(container)}"
-        if (v := self._cache.get(key)) is None:
-            manifest = super().get_manifest(container, allowed_media_type)
-            self._cache.set(key, json.dumps(manifest))
-            return manifest
-        else:
-            return json.loads(v)
 
     @ensure_container
     def get_blob(self, *args, **kwargs) -> Response:
@@ -94,14 +72,11 @@ class Registry(OrasRegistry):
 
     @ensure_container
     def get_artifact(self, container: container_type, digest: str) -> str:
-        key = f"blob-{self._container_key(container, digest)}"
-        if (v := self._cache.get(key)) is None:
-            resp = self.get_blob(container, digest)
-            v = resp.content.decode("utf-8")
-            self._cache.set(key, v)
-        return v
+        resp = self.get_blob(container, digest)
+        return resp.content.decode("utf-8")
 
-    def _list_referrers(self, c: Container, artifact_type: str | None = None) -> ImageIndexT:
+    @ensure_container
+    def list_referrers(self, c: Container, artifact_type: str | None = None) -> ImageIndexT:
         """List referrers of given image
 
         :param c: a Container object representing an image.
@@ -121,15 +96,3 @@ class Registry(OrasRegistry):
         resp = self.do_request(referrers_api)
         self._check_200_response(resp)
         return resp.json()
-
-    @ensure_container
-    def list_referrers(
-        self, container: container_type, artifact_type: str | None = None
-    ) -> ImageIndexT:
-        key = f"referrers-{self._container_key(container)}"
-        if (v := self._cache.get(key)) is None:
-            image_index = self._list_referrers(container, artifact_type)
-            self._cache.set(key, json.dumps(image_index))
-            return image_index
-        else:
-            return json.loads(v)

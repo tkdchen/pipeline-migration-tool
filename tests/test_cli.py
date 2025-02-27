@@ -1,5 +1,4 @@
 import json
-import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -9,7 +8,6 @@ import responses
 import pytest
 from oras.types import container_type
 
-from pipeline_migration.cache import CACHE_DIR_PREFIX, FileBasedCache
 from pipeline_migration.cli import entry_point
 from pipeline_migration.migrate import (
     ANNOTATION_HAS_MIGRATION,
@@ -41,23 +39,6 @@ UPGRADES: Final = [
         "parentDir": ".tekton",
     },
 ]
-
-
-class TestConfigureCacheDir:
-
-    def test_set_from_command_line(self, monkeypatch, tmp_path):
-        monkeypatch.setattr("sys.argv", ["mt", "-u", json.dumps(UPGRADES), "-d", str(tmp_path)])
-        monkeypatch.setattr("pipeline_migration.cli.migrate", lambda arg, klass: 1)
-        assert entry_point() is None
-        assert FileBasedCache.config["cache_dir"] == str(tmp_path)
-
-    def test_fallback_to_a_temporary_dir(self, monkeypatch):
-        monkeypatch.setattr("sys.argv", ["mt", "-u", json.dumps(UPGRADES)])
-        monkeypatch.setattr("pipeline_migration.cli.migrate", lambda arg, klass: 1)
-        assert entry_point() is None
-        cache_dir = FileBasedCache.config["cache_dir"]
-        assert os.path.isdir(cache_dir)
-        assert os.path.basename(cache_dir.rstrip("/")).startswith(CACHE_DIR_PREFIX)
 
 
 @dataclass
@@ -369,19 +350,6 @@ def test_cli_stops_if_input_upgrades_is_invalid(upgrades, expected_err_msgs, mon
     assert entry_point() == 1
     for err_msg in expected_err_msgs:
         assert err_msg in caplog.text
-
-
-def test_ensure_cache_dir_is_created(tmp_path, monkeypatch):
-
-    def fake_migrate_method(*args, **kwargs):
-        """This method is used for test_ensure_cache_dir_is_created only"""
-
-    monkeypatch.setattr("pipeline_migration.cli.migrate", fake_migrate_method)
-    cache_dir = tmp_path / "cache"
-    cli_cmd = ["pmt", "-u", json.dumps(UPGRADES), "--cache-dir", str(cache_dir)]
-    monkeypatch.setattr("sys.argv", cli_cmd)
-    entry_point()
-    assert cache_dir.exists()
 
 
 class TestBundleUpgradeByLinkedMigration:

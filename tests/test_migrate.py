@@ -9,7 +9,6 @@ from typing import Any, Final
 import responses
 import pytest
 
-from pipeline_migration.cache import FileBasedCache
 from pipeline_migration.migrate import (
     ANNOTATION_HAS_MIGRATION,
     ANNOTATION_IS_MIGRATION,
@@ -29,12 +28,6 @@ from pipeline_migration.quay import QuayTagInfo
 from pipeline_migration.registry import Container
 from pipeline_migration.utils import load_yaml, dump_yaml
 from tests.utils import generate_digest
-
-
-@pytest.fixture(autouse=True)
-def disable_cache(monkeypatch):
-    """Disable file-based cache for tests in this module"""
-    monkeypatch.setenv("FILE_BASED_CACHE_DISABLED", "true")
 
 
 # Tags are listed from the latest to the oldest one.
@@ -834,11 +827,8 @@ class TestLinkedMigrationsResolver:
         ],
     )
     def test_upgrade_doesnt_include_migration(
-        self, case_, image_manifest, mock_get_manifest, tmp_path, disable_cache
+        self, case_, image_manifest, mock_get_manifest, tmp_path
     ):
-        # TODO: remove the cache
-        FileBasedCache.config["cache_dir"] = str(tmp_path)
-
         tb_upgrade = TaskBundleUpgrade(
             dep_name=APP_IMAGE_REPO,
             current_value="0.1",
@@ -873,20 +863,13 @@ class TestLinkedMigrationsResolver:
     @responses.activate
     @pytest.mark.parametrize("case_", ["single", "multiple"])
     def test_migration_is_resolved(
-        self,
-        case_,
-        image_manifest,
-        mock_fetch_migration,
-        mock_get_manifest,
-        tmp_path,
-        disable_cache,
+        self, case_, image_manifest, mock_fetch_migration, mock_get_manifest, tmp_path
     ):
         """Test an upgrade includes a single migration
 
         Test data: upgrade has bundles: bundle1, bundle2 (M), bundle3.
         bundle2 has a migration, and bundle3 points to bundle2 by annotation.
         """
-        FileBasedCache.config["cache_dir"] = str(tmp_path)
 
         tb_upgrade = TaskBundleUpgrade(
             dep_name=APP_IMAGE_REPO,

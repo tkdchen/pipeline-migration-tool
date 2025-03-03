@@ -10,12 +10,8 @@ export QUAY_NAMESPACE
 declare -r DEFAULT_RECIPES="
 clone 0.2 -
 clone 0.2 M
-clone 0.2 -
 clone 0.2 M
 clone 0.2 -
-lint 0.2 -
-lint 0.2 M
-lint 0.2 M
 lint 0.2 M
 lint 0.2 -
 "
@@ -63,13 +59,25 @@ create_migration() {
 
     local -r migration_file="${migration_dir}/${new_version}.sh"
 
+    local -r filename=${task_file##*/}
+    local -r task_name=${filename%.*}
+
     cat >"$migration_file" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
-declare -r pipeline_file=\${1:?Missing pipeline file}
 
-# Created at $(date)
-# Migration for task ${task_file##*/} and version ${new_version}
+declare -r pipeline_file=\${1:?Missing pipeline file}
+declare -r history="Migration was created at $(date --iso-8601=s --utc)"
+declare -r params_selector='.spec.tasks[] | select(.name == "${task_name}") | .params'
+declare -r history_selector="\${params_selector}[] | select(.name == \"history\")"
+
+if yq -e "\$history_selector" "\$pipeline_file" >/dev/null 2>&1
+then
+    yq -i "(\${history_selector} | .value) += [\"\${history}\"]" "\$pipeline_file"
+else
+    yq -i "(\${params_selector}) += [{\"name\": \"history\", \"value\": [\"\${history}\"]}]" "\$pipeline_file"
+fi
+
 EOF
     echo "$migration_file"
 }

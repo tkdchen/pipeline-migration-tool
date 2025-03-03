@@ -17,13 +17,13 @@ spec:
       - name: kind
         value: task
       resolver: bundles
-  - name: test
+  - name: lint
     taskRef:
       params:
       - name: name
-        value: test
+        value: lint
       - name: bundle
-        value: quay.io/mytestworkload/task-test:0.2@sha256:67890
+        value: quay.io/mytestworkload/task-lint:0.2@sha256:67890
       - name: kind
         value: task
       resolver: bundles

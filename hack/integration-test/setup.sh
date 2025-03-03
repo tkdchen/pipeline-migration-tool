@@ -10,12 +10,8 @@ export QUAY_NAMESPACE
 declare -r DEFAULT_RECIPES="
 clone 0.2 -
 clone 0.2 M
-clone 0.2 -
 clone 0.2 M
 clone 0.2 -
-lint 0.2 -
-lint 0.2 M
-lint 0.2 M
 lint 0.2 M
 lint 0.2 -
 "

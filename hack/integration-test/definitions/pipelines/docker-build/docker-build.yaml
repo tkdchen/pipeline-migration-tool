@@ -1,0 +1,14 @@
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: docker-build
+spec:
+  tasks:
+  - name: clone
+    taskRef:
+      name: clone
+      version: "0.2"
+  - name: lint
+    taskRef:
+      name: lint
+      version: "0.2"

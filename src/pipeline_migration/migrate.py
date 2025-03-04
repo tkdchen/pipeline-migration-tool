@@ -250,39 +250,39 @@ class TaskBundleUpgradesManager:
         """Resolve migrations for given task bundle upgrades"""
         self._resolver.resolve(list(self._task_bundle_upgrades.values()))
 
-    @staticmethod
-    def _apply_migration(pipeline_file: FilePath, migration: TaskBundleMigration) -> None:
-        if not os.path.exists(pipeline_file):
-            raise ValueError(f"Pipeline file does not exist: {pipeline_file}")
-
-        logger.info(
-            "Apply migration of task bundle %s in package file %s",
-            migration.task_bundle,
-            pipeline_file,
-        )
-
-        fd, migration_file = tempfile.mkstemp()
-        try:
-            os.write(fd, migration.migration_script.encode("utf-8"))
-        finally:
-            os.close(fd)
-
-        with resolve_pipeline(pipeline_file) as file_path:
-            logger.info("Executing migration script %s on %s", migration_file, file_path)
-            cmd = ["bash", migration_file, file_path]
-            logger.debug("Run: %r", cmd)
-            try:
-                proc = sp.run(cmd, stderr=sp.STDOUT, stdout=sp.PIPE)
-                logger.debug("%r", proc.stdout)
-                proc.check_returncode()
-            finally:
-                os.unlink(migration_file)
-
     def apply_migrations(self) -> None:
         for package_file in self._package_file_updates.values():
-            for task_bundle_upgrade in package_file.task_bundle_upgrades:
-                for migration in task_bundle_upgrade.migrations:
-                    self._apply_migration(package_file.file_path, migration)
+            if not os.path.exists(package_file.file_path):
+                raise ValueError(f"Pipeline file does not exist: {package_file.file_path}")
+            with resolve_pipeline(package_file.file_path) as pipeline_file:
+                fd, migration_file = tempfile.mkstemp(suffix="-migration-file")
+                prev_size = 0
+                try:
+                    for task_bundle_upgrade in package_file.task_bundle_upgrades:
+                        for migration in task_bundle_upgrade.migrations:
+                            logger.info(
+                                "Apply migration of task bundle %s in package file %s",
+                                migration.task_bundle,
+                                package_file.file_path,
+                            )
+
+                            os.lseek(fd, 0, 0)
+                            content = migration.migration_script.encode("utf-8")
+                            if len(content) < prev_size:
+                                os.truncate(fd, len(content))
+                            prev_size = os.write(fd, content)
+
+                            logger.info(
+                                "Executing migration script %s on %s", migration_file, pipeline_file
+                            )
+                            cmd = ["bash", migration_file, pipeline_file]
+                            logger.debug("Run: %r", cmd)
+                            proc = sp.run(cmd, stderr=sp.STDOUT, stdout=sp.PIPE)
+                            logger.debug("%r", proc.stdout)
+                            proc.check_returncode()
+                finally:
+                    os.close(fd)
+                    os.unlink(migration_file)
 
 
 class IncorrectMigrationAttachment(Exception):

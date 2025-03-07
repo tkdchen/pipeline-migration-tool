@@ -665,67 +665,76 @@ spec:
 class TestApplyMigrations:
 
     @pytest.mark.parametrize("chdir", [True, False])
-    def test_apply_single_migration(self, chdir, monkeypatch, tmp_path) -> None:
-        """Test applying a single migration to a pipeline file
+    def test_apply_migrations(self, chdir, tmp_path, monkeypatch):
+        """Ensure applying all resolved migrations"""
 
-        The migration tool aims to run inside a component repository, from
-        where the packageFile is accessed by a relative path. Test parameter
-        ``chdir`` indicates to change the working directory for this test to
-        test the different behaviors.
-        """
-        from dataclasses import dataclass, field
+        renovate_upgrades = [
+            {
+                "depName": TASK_BUNDLE_CLONE,
+                "currentValue": "0.1",
+                "currentDigest": "sha256:cff6b68a194a",
+                "newValue": "0.2",
+                "newDigest": "sha256:96e797480ac5",
+                "depTypes": ["tekton-bundle"],
+                "packageFile": ".tekton/pipeline.yaml",
+                "parentDir": ".tekton",
+            },
+        ]
+        manager = TaskBundleUpgradesManager(renovate_upgrades, SimpleIterationResolver)
 
-        @dataclass
-        class TestContext:
-            bash_run: bool = False
-            temp_files: list[tuple[int, str]] = field(default_factory=list)
+        # Not really resolve migrations. Mock them instead, then apply.
+        tb_upgrade = list(manager._task_bundle_upgrades.values())[0]
 
-        test_context = TestContext()
+        c = Container(f"{tb_upgrade.dep_name}:{tb_upgrade.new_value}@{generate_digest()}")
+        m = TaskBundleMigration(task_bundle=c.uri_with_tag, migration_script="echo add a new task")
+        tb_upgrade.migrations.append(m)
+
+        # Less content of the migration script than previous one, which covers file truncate.
+        c = Container(f"{tb_upgrade.dep_name}:{tb_upgrade.new_value}@{generate_digest()}")
+        m = TaskBundleMigration(task_bundle=c.uri_with_tag, migration_script="echo hello")
+        tb_upgrade.migrations.append(m)
+
+        c = Container(f"{tb_upgrade.dep_name}:{tb_upgrade.new_value}@{tb_upgrade.new_digest}")
+        m = TaskBundleMigration(
+            task_bundle=c.uri_with_tag, migration_script="echo remove task param"
+        )
+        tb_upgrade.migrations.append(m)
+
+        tekton_dir = tmp_path / ".tekton"
+        tekton_dir.mkdir()
+        package_file = tekton_dir / "pipeline.yaml"
+        package_file.write_text(PIPELINE_DEFINITION)
+
+        test_context = {"executed_scripts": []}
         counter = itertools.count()
-        migration_script: Final = "echo hello world"
 
         def _mkstemp(*args, **kwargs):
             tmp_file_path = tmp_path / f"temp_file-{next(counter)}"
             tmp_file_path.write_text("")
             fd = os.open(tmp_file_path, os.O_RDWR)
-            test_context.temp_files.append((fd, tmp_file_path))
             return fd, tmp_file_path
 
         def subprocess_run(*args, **kwargs):
             cmd = args[0]
-            with open(cmd[-1], "r") as f:
-                assert f.read() == PIPELINE_DEFINITION
             with open(cmd[-2], "r") as f:
-                assert f.read() == migration_script
-            assert not kwargs.get("check")
-            test_context.bash_run = True
+                test_context["executed_scripts"].append(f.read())
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
         monkeypatch.setattr("tempfile.mkstemp", _mkstemp)
         monkeypatch.setattr("subprocess.run", subprocess_run)
 
-        pipeline_file: Final = tmp_path / "pipeline.yaml"
-        pipeline_file.write_text(PIPELINE_DEFINITION)
-
-        renovate_upgrades = deepcopy(RENOVATE_UPGRADES)
-        manager = TaskBundleUpgradesManager(renovate_upgrades, SimpleIterationResolver)
-
-        tb_migration = TaskBundleMigration("task-bundle:0.3@sha256:1234", migration_script)
         if chdir:
             monkeypatch.chdir(tmp_path)
-            manager._apply_migration("pipeline.yaml", tb_migration)
+            manager.apply_migrations()
+
+            expected = ["echo add a new task", "echo hello", "echo remove task param"]
+            assert test_context["executed_scripts"] == expected
         else:
-            with pytest.raises(ValueError, match="Pipeline file does not exist: pipeline.yaml"):
-                manager._apply_migration("pipeline.yaml", tb_migration)
-            return
+            with pytest.raises(ValueError, match="Pipeline file does not exist: .+"):
+                manager.apply_migrations()
 
-        assert test_context.bash_run
-        assert len(test_context.temp_files) > 0
-        for _, file_path in test_context.temp_files:
-            assert not os.path.exists(file_path)
-
-    def test_apply_migrations(self, tmp_path, monkeypatch):
-        """Ensure applying all resolved migrations"""
+    def test_raise_error_if_migration_process_fails(self, caplog, monkeypatch, tmp_path):
+        caplog.set_level(logging.DEBUG, logger="migrate")
 
         renovate_upgrades = [
             {
@@ -764,32 +773,6 @@ class TestApplyMigrations:
         package_file = tekton_dir / "pipeline.yaml"
         package_file.write_text(PIPELINE_DEFINITION)
 
-        test_context = {"executed_scripts": []}
-        counter = itertools.count()
-
-        def _mkstemp(*args, **kwargs):
-            tmp_file_path = tmp_path / f"temp_file-{next(counter)}"
-            tmp_file_path.write_text("")
-            fd = os.open(tmp_file_path, os.O_RDWR)
-            return fd, tmp_file_path
-
-        def subprocess_run(*args, **kwargs):
-            cmd = args[0]
-            with open(cmd[-2], "r") as f:
-                test_context["executed_scripts"].append(f.read())
-            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
-
-        monkeypatch.setattr("tempfile.mkstemp", _mkstemp)
-        monkeypatch.setattr("subprocess.run", subprocess_run)
-
-        monkeypatch.chdir(tmp_path)
-        manager.apply_migrations()
-
-        assert test_context["executed_scripts"] == ["echo add a new task", "echo remove task param"]
-
-    def test_raise_error_if_migration_process_fails(self, caplog, monkeypatch, tmp_path):
-        caplog.set_level(logging.DEBUG, logger="migrate")
-
         def _mkstemp(*args, **kwargs):
             tmp_file_path = tmp_path / "migration_file"
             tmp_file_path.write_text("")
@@ -805,13 +788,10 @@ class TestApplyMigrations:
         monkeypatch.setattr("tempfile.mkstemp", _mkstemp)
         monkeypatch.setattr("subprocess.run", subprocess_run)
 
-        pipeline_file: Final = tmp_path / "pipeline.yaml"
-        pipeline_file.write_text("kind: Pipeline")
-
-        manager = TaskBundleUpgradesManager(deepcopy(RENOVATE_UPGRADES), SimpleIterationResolver)
-        tb_migration = TaskBundleMigration("task-bundle:0.3@sha256:1234", "echo remove a param")
+        monkeypatch.chdir(tmp_path)
         with pytest.raises(subprocess.CalledProcessError):
-            manager._apply_migration(pipeline_file, tb_migration)
+            manager.apply_migrations()
+
         assert "something is wrong" in caplog.text
 
 

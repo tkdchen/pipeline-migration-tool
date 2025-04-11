@@ -1,5 +1,6 @@
 import pytest
 from copy import deepcopy
+from textwrap import dedent
 from typing import Final
 
 import responses
@@ -107,3 +108,43 @@ def mock_get_manifest(image_manifest):
         responses.add(responses.GET, f"https://{c.manifest_url()}", json=manifest_json)
 
     return _mock
+
+
+@pytest.fixture
+def pipeline_yaml():
+    return dedent(
+        """\
+        apiVersion: tekton.dev/v1
+        kind: Pipeline
+        metadata:
+          name: pl
+        spec:
+          tasks:
+          - name: clone
+            image: debian:latest
+            script: |
+              git clone https://git.host/project
+        """
+    )
+
+
+@pytest.fixture(params=["no_indents", "2_spaces_indents"])
+def pipeline_yaml_with_various_indent_styles(request, pipeline_yaml):
+    match request.param:
+        case "no_indents":
+            return pipeline_yaml
+        case "2_spaces_indents":
+            return dedent(
+                """\
+                apiVersion: tekton.dev/v1
+                kind: Pipeline
+                metadata:
+                  name: pl
+                spec:
+                  tasks:
+                    - name: clone
+                      image: debian:latest
+                      script: |
+                        git clone https://git.host/project
+                """
+            )

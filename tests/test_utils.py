@@ -1,6 +1,6 @@
 import pytest
 from textwrap import dedent
-from pipeline_migration.utils import YAMLStyle, dump_yaml, BlockSequenceIndentation
+from pipeline_migration.utils import YAMLStyle, dump_yaml, load_yaml, BlockSequenceIndentation
 
 YAML_EXAMPLE_0_INDENT = """\
 apiVersion: tekton.dev/v1
@@ -122,3 +122,14 @@ def test_dump_yaml_with_style(style, data, expected_yaml, tmp_path):
     yaml_file = tmp_path / "file.yaml"
     dump_yaml(yaml_file, data, style=style)
     assert yaml_file.read_text() == expected_yaml
+
+
+@pytest.mark.parametrize("yaml_content", [YAML_EXAMPLE_0_INDENT, YAML_EXAMPLE_2_INDENTS])
+def test_dump_same_yaml_with_consistent_indentation_formatting(yaml_content, tmp_path):
+    yaml_file = tmp_path / "file.yaml"
+    yaml_file.write_text(yaml_content)
+    style = YAMLStyle.detect(yaml_file)
+    doc = load_yaml(yaml_file)
+    new_file = tmp_path / "new.yaml"
+    dump_yaml(new_file, doc, style)
+    assert yaml_file.read_text() == new_file.read_text()

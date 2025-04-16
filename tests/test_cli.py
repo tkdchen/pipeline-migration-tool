@@ -23,7 +23,8 @@ from pipeline_migration.registry import (
     ensure_container,
 )
 
-from tests.test_migrate import APP_IMAGE_REPO, PIPELINE_DEFINITION, TASK_BUNDLE_CLONE
+from pipeline_migration.utils import YAMLStyle
+from tests.test_migrate import APP_IMAGE_REPO, TASK_BUNDLE_CLONE
 from tests.utils import generate_digest, generate_git_sha
 
 
@@ -218,20 +219,29 @@ class TestMigrateSingleTaskBundleUpgrade:
                 json={"tags": tags, "page": 1, "has_additional": False},
             )
 
-    def _mock_pipeline_file(self, tmp_path: Path) -> Path:
+    def _mock_pipeline_file(self, tmp_path: Path, content: str) -> Path:
         tekton_dir = tmp_path / ".tekton"
         tekton_dir.mkdir()
         pipeline_file = tekton_dir / "component-pipeline.yaml"
-        pipeline_file.write_text(PIPELINE_DEFINITION)
+        pipeline_file.write_text(content)
         return pipeline_file
 
     @responses.activate
     @pytest.mark.parametrize("use_linked_migrations", [True, False])
-    def test_apply_migrations(self, use_linked_migrations, monkeypatch, tmp_path):
+    def test_apply_migrations(
+        self,
+        use_linked_migrations,
+        pipeline_yaml_with_various_indent_styles,
+        monkeypatch,
+        tmp_path,
+    ):
         monkeypatch.setattr("pipeline_migration.migrate.Registry", MockRegistry)
         self._mock_quay_list_tags()
 
-        pipeline_file = self._mock_pipeline_file(tmp_path)
+        pipeline_file = self._mock_pipeline_file(tmp_path, pipeline_yaml_with_various_indent_styles)
+
+        # Verified later
+        origin_style = YAMLStyle.detect(pipeline_file)
 
         tb_upgrades = [
             {
@@ -291,6 +301,14 @@ class TestMigrateSingleTaskBundleUpgrade:
         monkeypatch.setattr("subprocess.run", _subprocess_run)
 
         assert entry_point() is None
+
+        # Verify result formatting
+        cur_style = YAMLStyle.detect(pipeline_file)
+        assert cur_style.indentation.is_consistent
+        if origin_style.indentation.is_consistent:
+            assert origin_style.indentation.levels == cur_style.indentation.levels
+        else:
+            assert cur_style.indentation.levels == [0]
 
 
 def test_entry_point_should_catch_error(monkeypatch, caplog):

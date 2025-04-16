@@ -646,26 +646,10 @@ class TestResolveMigrations:
         assert script_content == migrations[0].migration_script
 
 
-PIPELINE_DEFINITION: Final = dedent(
-    """\
-apiVersion: tekton.dev/v1
-kind: Pipeline
-metadata:
-  name: pl
-spec:
-  tasks:
-  - name: clone
-    image: debian:latest
-    script: |
-      git clone https://git.host/project
-"""
-)
-
-
 class TestApplyMigrations:
 
     @pytest.mark.parametrize("chdir", [True, False])
-    def test_apply_migrations(self, chdir, tmp_path, monkeypatch):
+    def test_apply_migrations(self, pipeline_yaml, chdir, tmp_path, monkeypatch):
         """Ensure applying all resolved migrations"""
 
         renovate_upgrades = [
@@ -703,7 +687,7 @@ class TestApplyMigrations:
         tekton_dir = tmp_path / ".tekton"
         tekton_dir.mkdir()
         package_file = tekton_dir / "pipeline.yaml"
-        package_file.write_text(PIPELINE_DEFINITION)
+        package_file.write_text(pipeline_yaml)
 
         test_context = {"executed_scripts": []}
         counter = itertools.count()
@@ -733,7 +717,9 @@ class TestApplyMigrations:
             with pytest.raises(ValueError, match="Pipeline file does not exist: .+"):
                 manager.apply_migrations()
 
-    def test_raise_error_if_migration_process_fails(self, caplog, monkeypatch, tmp_path):
+    def test_raise_error_if_migration_process_fails(
+        self, pipeline_yaml, caplog, monkeypatch, tmp_path
+    ):
         caplog.set_level(logging.DEBUG, logger="migrate")
 
         renovate_upgrades = [
@@ -771,7 +757,7 @@ class TestApplyMigrations:
         tekton_dir = tmp_path / ".tekton"
         tekton_dir.mkdir()
         package_file = tekton_dir / "pipeline.yaml"
-        package_file.write_text(PIPELINE_DEFINITION)
+        package_file.write_text(pipeline_yaml)
 
         def _mkstemp(*args, **kwargs):
             tmp_file_path = tmp_path / "migration_file"

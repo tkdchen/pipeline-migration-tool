@@ -14,8 +14,8 @@ from typing import Final, Any
 from pipeline_migration.utils import dump_yaml, load_yaml
 from pipeline_migration.registry import Container, Registry, ImageIndex
 from pipeline_migration.quay import QuayTagInfo, list_active_repo_tags
-from pipeline_migration.utils import is_true
 from pipeline_migration.types import FilePath
+from pipeline_migration.utils import is_true, YAMLStyle
 
 ANNOTATION_HAS_MIGRATION: Final[str] = "dev.konflux-ci.task.has-migration"
 ANNOTATION_IS_MIGRATION: Final[str] = "dev.konflux-ci.task.is-migration"
@@ -105,7 +105,9 @@ def resolve_pipeline(pipeline_file: FilePath) -> Generator[FilePath, Any, None]:
     :type pipeline_file: str
     :return: a generator yielding a file containing the pipeline definition.
     """
+    yaml_style = YAMLStyle.detect(pipeline_file)
     origin_pipeline = load_yaml(pipeline_file)
+
     if not isinstance(origin_pipeline, dict):
         raise ValueError(f"Given file {pipeline_file} is not a YAML mapping.")
 
@@ -113,7 +115,7 @@ def resolve_pipeline(pipeline_file: FilePath) -> Generator[FilePath, Any, None]:
     if kind == TEKTON_KIND_PIPELINE:
         yield pipeline_file
         pl_yaml = load_yaml(pipeline_file)
-        dump_yaml(pipeline_file, pl_yaml)
+        dump_yaml(pipeline_file, pl_yaml, style=yaml_style)
     elif kind == TEKTON_KIND_PIPELINE_RUN:
         spec = origin_pipeline.get("spec") or {}
         if "pipelineSpec" in spec:
@@ -125,7 +127,7 @@ def resolve_pipeline(pipeline_file: FilePath) -> Generator[FilePath, Any, None]:
             yield temp_pipeline_file
             modified_pipeline = load_yaml(temp_pipeline_file)
             spec["pipelineSpec"] = modified_pipeline["spec"]
-            dump_yaml(pipeline_file, origin_pipeline)
+            dump_yaml(pipeline_file, origin_pipeline, style=yaml_style)
         elif "pipelineRef" in spec:
             # Pipeline definition can be referenced here, via either git-resolver or a name field
             # pointing to YAML file under the .tekton/.

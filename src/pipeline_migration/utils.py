@@ -1,3 +1,4 @@
+import hashlib
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -106,3 +107,8 @@ def load_yaml(yaml_file: FilePath) -> Any:
 def dump_yaml(yaml_file: FilePath, data: Any, style: YAMLStyle | None = None) -> None:
     with open(yaml_file, "w", encoding="utf-8") as f:
         create_yaml_obj(style).dump(data, f)
+
+
+def file_checksum(file_path: FilePath) -> str:
+    with open(file_path, "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()

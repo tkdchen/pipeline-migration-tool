@@ -3,26 +3,31 @@ import itertools
 import logging
 import subprocess
 from copy import deepcopy
+from pathlib import Path
 from textwrap import dedent
 from typing import Any, Final
+from unittest.mock import patch
 
 import responses
 import pytest
+from ruamel.yaml import YAML
 
 from pipeline_migration.migrate import (
     ANNOTATION_HAS_MIGRATION,
     ANNOTATION_IS_MIGRATION,
     ANNOTATION_TRUTH_VALUE,
-    LinkedMigrationsResolver,
     determine_task_bundle_upgrades_range,
     fetch_migration_file,
     IncorrectMigrationAttachment,
     InvalidRenovateUpgradesData,
+    LinkedMigrationsResolver,
     resolve_pipeline,
+    SimpleIterationResolver,
     TaskBundleMigration,
     TaskBundleUpgrade,
     TaskBundleUpgradesManager,
-    SimpleIterationResolver,
+    TEKTON_KIND_PIPELINE,
+    TEKTON_KIND_PIPELINE_RUN,
 )
 from pipeline_migration.quay import QuayTagInfo
 from pipeline_migration.registry import Container
@@ -268,63 +273,55 @@ class TestTaskBundleUpgrade:
 
 class TestResolvePipeline:
 
-    def test_resolve_from_a_pipeline_definition(self, tmp_path):
+    def test_resolve_from_a_pipeline_definition(self, pipeline_yaml, tmp_path):
         pipeline_file = tmp_path / "pl.yaml"
-        content = dedent(
-            """\
-            apiVersion: tekton.dev/v1
-            kind: Pipeline
-            metadata:
-                name: pl
-            spec:
-                params:
-                tasks:
-            """
-        )
-        pipeline_file.write_text(content)
-        with resolve_pipeline(pipeline_file):
-            pass
+        pipeline_file.write_text(pipeline_yaml)
+        with resolve_pipeline(pipeline_file) as f:
+            assert pipeline_yaml == Path(f).read_text()
 
-    def test_resolve_from_a_pipeline_run_definition(self, tmp_path):
+    def test_resolve_from_a_pipeline_run_definition(self, pipeline_run_yaml, tmp_path):
         pipeline_file = tmp_path / "plr.yaml"
-        content = dedent(
-            """\
-            apiVersion: tekton.dev/v1
-            kind: PipelineRun
-            metadata:
-                name: pl
-            spec:
-                pipelineSpec:
-                    params:
-                    tasks:
-            """
-        )
-        pipeline_file.write_text(content)
-        with resolve_pipeline(pipeline_file):
-            pass
+        pipeline_file.write_text(pipeline_run_yaml)
+        with resolve_pipeline(pipeline_file) as f:
+            resolved_pipeline = load_yaml(f)
+            assert "spec" in resolved_pipeline
+            pipeline_run = load_yaml(pipeline_file)
+            assert resolved_pipeline["spec"] == pipeline_run["spec"]["pipelineSpec"]
 
-    def test_ensure_updates_to_pipeline_are_saved(self, tmp_path):
-        pipeline_file = tmp_path / "plr.yaml"
-        content = dedent(
-            """\
-            apiVersion: tekton.dev/v1
-            kind: PipelineRun
-            metadata:
-                name: pl
-            spec:
-                pipelineSpec:
-                    params:
-                    tasks:
-            """
-        )
-        pipeline_file.write_text(content)
+    def test_updates_to_pipeline_are_dumped(self, pipeline_and_run_yaml, tmp_path):
+        pipeline_file = tmp_path / "file.yaml"
+        pipeline_file.write_text(pipeline_and_run_yaml)
+
         with resolve_pipeline(pipeline_file) as f:
             pl = load_yaml(f)
-            pl["spec"]["tasks"] = [{"name": "init"}]
+            pl["spec"]["tasks"].append({"name": "test"})
             dump_yaml(f, pl)
 
-        plr = load_yaml(pipeline_file)
-        assert plr["spec"]["pipelineSpec"]["tasks"] == [{"name": "init"}]
+        doc = load_yaml(pipeline_file)
+        if doc["kind"] == TEKTON_KIND_PIPELINE:
+            tasks = doc["spec"]["tasks"]
+        elif doc["kind"] == TEKTON_KIND_PIPELINE_RUN:
+            tasks = doc["spec"]["pipelineSpec"]["tasks"]
+        else:
+            raise ValueError(f"Unexpected kind {doc['kind']}")
+
+        assert tasks[-1]["name"] == "test"
+
+    @patch("pipeline_migration.migrate.dump_yaml")
+    def test_do_not_save_if_pipeline_is_not_modified(
+        self, mock_dump_yaml, pipeline_and_run_yaml, tmp_path
+    ):
+        pipeline_file = tmp_path / "plr.yaml"
+        pipeline_file.write_text(pipeline_and_run_yaml)
+
+        with resolve_pipeline(pipeline_file):
+            pass  # Nothing is changed
+
+        doc = YAML().load(pipeline_and_run_yaml)
+        if doc["kind"] == TEKTON_KIND_PIPELINE:
+            assert mock_dump_yaml.call_count == 0
+        elif doc["kind"] == TEKTON_KIND_PIPELINE_RUN:
+            assert mock_dump_yaml.call_count == 1
 
     def test_do_not_handle_pipelineref(self, tmp_path):
         pipeline_file = tmp_path / "plr.yaml"

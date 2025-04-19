@@ -148,3 +148,34 @@ def pipeline_yaml_with_various_indent_styles(request, pipeline_yaml):
                         git clone https://git.host/project
                 """
             )
+        case _:
+            raise ValueError(f"Unexpected param {request.param}")
+
+
+@pytest.fixture
+def pipeline_run_yaml() -> str:
+    return dedent(
+        """\
+        apiVersion: tekton.dev/v1
+        kind: PipelineRun
+        metadata:
+          name: docker-build
+        spec:
+          pipelineSpec:
+            params:
+            tasks:
+            - name: clone
+            - name: build
+        """
+    )
+
+
+@pytest.fixture(params=["pipeline", "pipeline_run"])
+def pipeline_and_run_yaml(request, pipeline_yaml, pipeline_run_yaml) -> str:
+    match request.param:
+        case "pipeline":
+            return pipeline_yaml
+        case "pipeline_run":
+            return pipeline_run_yaml
+        case _:
+            raise ValueError(f"Unexpected param {request.param}")

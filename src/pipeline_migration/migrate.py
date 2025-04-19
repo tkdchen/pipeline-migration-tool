@@ -11,7 +11,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Final, Any
 
-from pipeline_migration.utils import dump_yaml, load_yaml
+from pipeline_migration.utils import dump_yaml, load_yaml, file_checksum
 from pipeline_migration.registry import Container, Registry, ImageIndex
 from pipeline_migration.quay import QuayTagInfo, list_active_repo_tags
 from pipeline_migration.types import FilePath
@@ -113,9 +113,11 @@ def resolve_pipeline(pipeline_file: FilePath) -> Generator[FilePath, Any, None]:
 
     kind = origin_pipeline.get("kind")
     if kind == TEKTON_KIND_PIPELINE:
+        origin_checksum = file_checksum(pipeline_file)
         yield pipeline_file
-        pl_yaml = load_yaml(pipeline_file)
-        dump_yaml(pipeline_file, pl_yaml, style=yaml_style)
+        if file_checksum(pipeline_file) != origin_checksum:
+            pl_yaml = load_yaml(pipeline_file)
+            dump_yaml(pipeline_file, pl_yaml, style=yaml_style)
     elif kind == TEKTON_KIND_PIPELINE_RUN:
         spec = origin_pipeline.get("spec") or {}
         if "pipelineSpec" in spec:
@@ -124,10 +126,12 @@ def resolve_pipeline(pipeline_file: FilePath) -> Generator[FilePath, Any, None]:
             os.close(fd)
             pipeline = {"spec": spec["pipelineSpec"]}
             dump_yaml(temp_pipeline_file, pipeline)
+            origin_checksum = file_checksum(temp_pipeline_file)
             yield temp_pipeline_file
-            modified_pipeline = load_yaml(temp_pipeline_file)
-            spec["pipelineSpec"] = modified_pipeline["spec"]
-            dump_yaml(pipeline_file, origin_pipeline, style=yaml_style)
+            if file_checksum(temp_pipeline_file) != origin_checksum:
+                modified_pipeline = load_yaml(temp_pipeline_file)
+                spec["pipelineSpec"] = modified_pipeline["spec"]
+                dump_yaml(pipeline_file, origin_pipeline, style=yaml_style)
         elif "pipelineRef" in spec:
             # Pipeline definition can be referenced here, via either git-resolver or a name field
             # pointing to YAML file under the .tekton/.

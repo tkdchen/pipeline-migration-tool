@@ -23,7 +23,7 @@ from pipeline_migration.registry import (
     ensure_container,
 )
 
-from pipeline_migration.utils import YAMLStyle
+from pipeline_migration.utils import YAMLStyle, load_yaml, dump_yaml
 from tests.test_migrate import APP_IMAGE_REPO, TASK_BUNDLE_CLONE
 from tests.utils import generate_digest, generate_git_sha
 
@@ -296,6 +296,12 @@ class TestMigrateSingleTaskBundleUpgrade:
             assert pipeline_file == tb_upgrades[0]["packageFile"]
             migration_file = cmd[-2]
             assert Path(migration_file).read_bytes() in migration_steps
+
+            # Modify the pipeline as if a migration is applied
+            doc = load_yaml(pipeline_file)
+            doc["spec"]["tasks"] += {"name": "summary"}
+            dump_yaml(pipeline_file, doc)
+
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
         monkeypatch.setattr("subprocess.run", _subprocess_run)

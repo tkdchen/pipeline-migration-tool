@@ -58,32 +58,6 @@ class TaskBundleUpgrade:
     def new_bundle(self) -> str:
         return f"{self.dep_name}:{self.new_value}@{self.new_digest}"
 
-    @property
-    def comes_from_konflux(self) -> bool:
-        if os.environ.get("PMT_LOCAL_TEST"):
-            logger.warning(
-                "Environment variable PMT_LOCAL_TEST is set. Migration tool works with images "
-                "from arbitrary registry organization."
-            )
-            return True
-        return self.dep_name.startswith("quay.io/konflux-ci/")
-
-    def __post_init__(self) -> None:
-        if not self.dep_name:
-            raise InvalidRenovateUpgradesData("Image name is empty.")
-        if not self.current_value and not self.current_digest:
-            raise InvalidRenovateUpgradesData("Both currentValue and currentDigest are empty.")
-        if not self.new_value and not self.new_digest:
-            raise InvalidRenovateUpgradesData("Both newValue and newDigest are empty.")
-        if self.current_value == self.new_value and self.current_digest == self.new_digest:
-            raise InvalidRenovateUpgradesData("Current and new task bundle are same.")
-
-        regex = re.compile(DIGEST_REGEXP)
-        if not regex.fullmatch(self.current_digest):
-            raise InvalidRenovateUpgradesData("Current digest is not a valid digest string.")
-        if not regex.fullmatch(self.new_digest):
-            raise InvalidRenovateUpgradesData("New digest is not a valid digest string.")
-
 
 @dataclass
 class PackageFile:
@@ -227,20 +201,6 @@ class TaskBundleUpgradesManager:
                 parent_dir=upgrade["parentDir"],
             )
 
-            if "tekton-bundle" not in upgrade["depTypes"]:
-                logger.debug(
-                    "Dependency %s is not handled by tekton-bundle manager.",
-                    task_bundle_upgrade.dep_name,
-                )
-                continue
-
-            if not task_bundle_upgrade.comes_from_konflux:
-                logger.info(
-                    "Dependency %s does not come from Konflux task definitions.",
-                    task_bundle_upgrade.dep_name,
-                )
-                continue
-
             tb_update = self._task_bundle_upgrades.get(task_bundle_upgrade.current_bundle)
             if tb_update is None:
                 self._task_bundle_upgrades[task_bundle_upgrade.current_bundle] = task_bundle_upgrade
@@ -257,7 +217,7 @@ class TaskBundleUpgradesManager:
         self._resolver.resolve(list(self._task_bundle_upgrades.values()))
 
     def apply_migrations(self) -> None:
-        for package_file in self._package_file_updates.values():
+        for package_file in self.package_files:
             if not os.path.exists(package_file.file_path):
                 raise ValueError(f"Pipeline file does not exist: {package_file.file_path}")
             with resolve_pipeline(package_file.file_path) as pipeline_file:

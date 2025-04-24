@@ -1,6 +1,7 @@
 import argparse
 import json
 import logging
+import os
 from typing import Any, Final
 
 from jsonschema.exceptions import ValidationError
@@ -16,17 +17,24 @@ from pipeline_migration.migrate import (
 logging.basicConfig(level=logging.DEBUG, format="%(levelname)s:%(asctime)s:%(name)s:%(message)s")
 logger = logging.getLogger("cli")
 
-SCHEMA_UPGRADE: Final = {
+SCHEMA_UPGRADE: Final[dict[str, Any]] = {
+    "$schema": "https://json-schema.org/draft/2020-12",
+    "title": "Schema for Renovate upgrade data",
     "type": "object",
     "properties": {
-        "depName": {"type": "string"},
-        "currentValue": {"type": "string"},
+        "depName": {"type": "string", "minLength": 1},
+        "currentValue": {"type": "string", "minLength": 1},
         "currentDigest": {"type": "string", "pattern": "^sha256:[0-9a-f]+$"},
-        "newValue": {"type": "string"},
+        "newValue": {"type": "string", "minLength": 1},
         "newDigest": {"type": "string", "pattern": "^sha256:[0-9a-f]+$"},
-        "depTypes": {"type": "array", "items": {"type": "string"}},
-        "packageFile": {"type": "string"},
-        "parentDir": {"type": "string"},
+        "depTypes": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"type": "string"},
+            "contains": {"const": "tekton-bundle"},
+        },
+        "packageFile": {"type": "string", "minLength": 1},
+        "parentDir": {"type": "string", "minLength": 1},
     },
     "additionalProperties": True,
     "required": [
@@ -41,29 +49,37 @@ SCHEMA_UPGRADE: Final = {
     ],
 }
 
-SCHEMA_UPGRADES: Final[dict[str, Any]] = {
-    "$schema": "https://json-schema.org/draft/2020-12",
-    "title": "Schema for Renovate upgrades data",
-    "type": "array",
-    "items": {},
-}
 
-SCHEMA_UPGRADES["items"].update(SCHEMA_UPGRADE)
+def comes_from_konflux(image_repo: str) -> bool:
+    if os.environ.get("PMT_LOCAL_TEST"):
+        logger.warning(
+            "Environment variable PMT_LOCAL_TEST is set. Migration tool works with images "
+            "from arbitrary registry organization."
+        )
+        return True
+    return image_repo.startswith("quay.io/konflux-ci/")
 
 
-def validate_upgrades(raw_input: str) -> list[dict[str, Any]]:
-    """Validate input upgrades data
+def clean_upgrades(input_upgrades: str) -> list[dict[str, Any]]:
+    """Clean input Renovate upgrades string
 
-    Validate the input upgrades data. Raise errors if it is invalid.
+    Only images from konflux-ci image organization are returned. If
+    PMT_LOCAL_TEST environment variable is set, this check is skipped and images
+    from arbitrary image organizations are returned.
 
-    :param raw_input: an encoded JSON string including upgrades data.
-    :type raw_input: str
-    :return: validated upgrades data
-    :rtype: list[dict[str, any]]
+    Only return images handled by Renovate tekton manager.
+
+    :param input_upgrades: a JSON string containing Renovate upgrades data.
+    :type input_upgrades: str
+    :return: a list of valid upgrade mappings.
+    :raises InvalidRenovateUpgradesData: if the input upgrades data is not a
+        JSON data and cannot be decoded. If the loaded upgrades data cannot be
+        validated by defined schema, also raise this error.
     """
+    cleaned_upgrades: list[dict[str, Any]] = []
 
     try:
-        upgrades = json.loads(raw_input)
+        upgrades = json.loads(input_upgrades)
     except json.decoder.JSONDecodeError as e:
         logger.error("Input upgrades is not a valid encoded JSON string: %s", e)
         logger.error(
@@ -72,15 +88,48 @@ def validate_upgrades(raw_input: str) -> list[dict[str, Any]]:
         )
         raise InvalidRenovateUpgradesData("Input upgrades is not a valid encoded JSON string.")
 
-    try:
-        Draft202012Validator(SCHEMA_UPGRADES).validate(upgrades)
-    except ValidationError as e:
-        logger.error("Input upgrades data does not pass schema validation: %s", e)
-        raise InvalidRenovateUpgradesData(
-            f"Invalid upgrades data: {e.message} at path '{e.json_path}'"
-        )
+    if not isinstance(upgrades, list):
+        logger.warning("Input upgrades is not a list.")
+        return cleaned_upgrades
 
-    return upgrades
+    validator = Draft202012Validator(SCHEMA_UPGRADE)
+
+    for upgrade in upgrades:
+        if not upgrade:
+            continue  # silently ignore any falsy objects
+
+        dep_name = upgrade.get("depName")
+
+        if not dep_name:
+            raise InvalidRenovateUpgradesData("Upgrade does not have value of field depName.")
+
+        if not comes_from_konflux(dep_name):
+            logger.info("Dependency %s does not come from Konflux task definitions.", dep_name)
+            continue
+
+        try:
+            validator.validate(upgrade)
+        except ValidationError as e:
+            if e.path:  # path could be empty due to missing required properties
+                field = e.path[0]
+            else:
+                field = ""
+
+            if field == "depTypes":
+                logger.warning("%s %s. Skip image %s", field, e.message, dep_name)
+                continue
+
+            logger.error("Input upgrades data does not pass schema validation: %s", e)
+
+            if e.validator == "minLength":
+                err_msg = f"Property {field} is empty: {e.message}"
+            else:
+                err_msg = f"Invalid upgrades data: {e.message}, path '{e.json_path}'"
+            raise InvalidRenovateUpgradesData(err_msg)
+
+        cleaned_upgrades.append(upgrade)
+
+    return cleaned_upgrades
 
 
 def main() -> None:
@@ -105,7 +154,13 @@ def main() -> None:
         resolver_class = SimpleIterationResolver
     else:
         resolver_class = LinkedMigrationsResolver
-    migrate(validate_upgrades(args.renovate_upgrades), resolver_class)
+
+    if args.renovate_upgrades:
+        upgrades = clean_upgrades(args.renovate_upgrades)
+        if upgrades:
+            migrate(upgrades, resolver_class)
+    else:
+        logger.info("empty input upgrades.")
 
 
 def entry_point():

@@ -19,7 +19,6 @@ from pipeline_migration.migrate import (
     determine_task_bundle_upgrades_range,
     fetch_migration_file,
     IncorrectMigrationAttachment,
-    InvalidRenovateUpgradesData,
     LinkedMigrationsResolver,
     resolve_pipeline,
     SimpleIterationResolver,
@@ -172,103 +171,6 @@ class TestTaskBundleUpgrade:
         )
         assert upgrade.current_bundle == f"{APP_IMAGE_REPO}:0.1@{current_digest}"
         assert upgrade.new_bundle == f"{APP_IMAGE_REPO}:0.2@{new_digest}"
-
-    @pytest.mark.parametrize(
-        "upgrade,expected",
-        [
-            [
-                TaskBundleUpgrade(
-                    dep_name=APP_IMAGE_REPO,
-                    current_value="0.1",
-                    current_digest=generate_digest(),
-                    new_value="0.2",
-                    new_digest=generate_digest(),
-                ),
-                False,
-            ],
-            [
-                TaskBundleUpgrade(
-                    dep_name="quay.io/konflux-ci/tester",
-                    current_value="0.1",
-                    current_digest=generate_digest(),
-                    new_value="0.3",
-                    new_digest=generate_digest(),
-                ),
-                True,
-            ],
-        ],
-    )
-    def test_if_upgrade_comes_from_a_specific_org(self, upgrade: TaskBundleUpgrade, expected):
-        assert upgrade.comes_from_konflux == expected
-
-    @pytest.mark.parametrize(
-        "data,expected",
-        [
-            [
-                {
-                    "dep_name": "",
-                    "current_value": "",
-                    "current_digest": "",
-                    "new_value": "",
-                    "new_digest": "",
-                },
-                "Image name is empty",
-            ],
-            [
-                {
-                    "dep_name": APP_IMAGE_REPO,
-                    "current_value": "",
-                    "current_digest": "",
-                    "new_value": "",
-                    "new_digest": "",
-                },
-                "Both currentValue and currentDigest are empty.",
-            ],
-            [
-                {
-                    "dep_name": APP_IMAGE_REPO,
-                    "current_value": "0.1",
-                    "current_digest": generate_digest(),
-                    "new_value": "",
-                    "new_digest": "",
-                },
-                "Both newValue and newDigest are empty.",
-            ],
-            [
-                {
-                    "dep_name": APP_IMAGE_REPO,
-                    "current_value": "0.1",
-                    "current_digest": "sha256:cff6b68a194a",
-                    "new_value": "0.1",
-                    "new_digest": "sha256:cff6b68a194a",
-                },
-                "Current and new task bundle are same",
-            ],
-            [
-                {
-                    "dep_name": APP_IMAGE_REPO,
-                    "current_value": "0.1",
-                    "current_digest": "cff6b68a194a",
-                    "new_value": "0.2",
-                    "new_digest": "sha256:96e797480ac5",
-                },
-                "Current digest is not a valid digest string",
-            ],
-            [
-                {
-                    "dep_name": APP_IMAGE_REPO,
-                    "current_value": "0.1",
-                    "current_digest": "sha256:cff6b68a194a",
-                    "new_value": "0.2",
-                    "new_digest": "96e797480ac5",
-                },
-                "New digest is not a valid digest string",
-            ],
-        ],
-    )
-    def test_invalid_upgrade(self, data, expected):
-        with pytest.raises(InvalidRenovateUpgradesData, match=expected):
-            TaskBundleUpgrade(**data)
 
 
 class TestResolvePipeline:
@@ -442,36 +344,6 @@ class TestTaskBundleUpgradesManagerCollectUpgrades:
     def test_collect_upgrades(self):
         manager = TaskBundleUpgradesManager(self.test_upgrades, SimpleIterationResolver)
         assert len(manager._task_bundle_upgrades) == 3
-
-    def test_skip_non_konflux_bundles(self):
-        """
-        Modify a task bundle for push package file, then check the number of collected upgrades,
-        which is less than the number of upgrades of push in the APP_IMAGE_REPO.
-        """
-        upgrade = [
-            upgrade
-            for upgrade in self.test_upgrades
-            if upgrade["depName"].endswith("-tests")
-            and upgrade["packageFile"].endswith("push.yaml")
-        ]
-        upgrade[0]["depName"] = APP_IMAGE_REPO
-
-        manager = TaskBundleUpgradesManager(self.test_upgrades, SimpleIterationResolver)
-        package_files = [
-            package_file
-            for package_file in manager.package_files
-            if package_file.file_path.endswith("push.yaml")
-        ]
-        assert len(package_files[0].task_bundle_upgrades) == 1
-
-    def test_do_not_include_upgrade_by_tekton_bundle_manager(self):
-        for upgrade in self.test_upgrades:
-            if upgrade["packageFile"].endswith("push.yaml"):
-                upgrade["depTypes"] = ["some-other-renovate-manager"]
-
-        manager = TaskBundleUpgradesManager(self.test_upgrades, SimpleIterationResolver)
-        package_files = set([upgrade["packageFile"] for upgrade in self.test_upgrades])
-        assert len(package_files) > len(manager._package_file_updates)
 
 
 class TestFetchMigrationFile:

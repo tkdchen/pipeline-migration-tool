@@ -6,7 +6,6 @@ from typing import Final
 
 import responses
 import pytest
-from _pytest.python_api import RaisesContext
 from oras.types import container_type
 
 from pipeline_migration.cli import clean_upgrades, entry_point
@@ -401,8 +400,8 @@ def test_do_nothing_if_input_upgrades_is_empty(upgrades, monkeypatch):
 
     monkeypatch.setattr("pipeline_migration.cli.migrate", _migrate)
 
-    assert not called[0]
     assert entry_point() is None
+    assert not called[0]
 
 
 class TestBundleUpgradeByLinkedMigration:
@@ -416,21 +415,16 @@ mock_image_digest_2: Final[str] = generate_digest()
 @pytest.mark.parametrize(
     "upgrades_json_s,expected",
     [
-        ["", pytest.raises(InvalidRenovateUpgradesData, match=r"not a valid encoded JSON string")],
-        [" ", pytest.raises(InvalidRenovateUpgradesData, match=r"not a valid encoded JSON string")],
-        [
-            "depName",
-            pytest.raises(InvalidRenovateUpgradesData, match=r"not a valid encoded JSON string"),
-        ],
-        pytest.param("{}", [], id="ignore-unexpected-mapping"),
+        ["", "not a valid encoded JSON string"],
+        [" ", "not a valid encoded JSON string"],
+        ["depName", "not a valid encoded JSON string"],
+        pytest.param("{}", "is not a list", id="ignore-unexpected-mapping"),
+        pytest.param("100", "is not a list", id="skip-handling-malformed-input-upgrades"),
         pytest.param("[]", [], id="empty-upgrades-list-results-in-empty-result"),
         pytest.param("[{}]", [], id="ignore-falsy-objects"),
-        pytest.param("100", [], id="skip-handling-malformed-input-upgrades"),
         pytest.param(
             json.dumps([{"currentValue": "0.2"}]),
-            pytest.raises(
-                InvalidRenovateUpgradesData, match=r"does not have value of field depName"
-            ),
+            "does not have value of field depName",
             id="depName-is-not-included",
         ),
         pytest.param(
@@ -448,9 +442,7 @@ mock_image_digest_2: Final[str] = generate_digest()
                     },
                 ],
             ),
-            pytest.raises(
-                InvalidRenovateUpgradesData, match=r"does not have value of field depName"
-            ),
+            "does not have value of field depName",
             id="depName-is-included-but-empty",
         ),
         pytest.param(
@@ -467,7 +459,7 @@ mock_image_digest_2: Final[str] = generate_digest()
                     },
                 ],
             ),
-            pytest.raises(InvalidRenovateUpgradesData, match=r"Property currentValue is empty"),
+            "Property currentValue is empty",
             id="empty-property-digest",
         ),
         pytest.param(
@@ -484,12 +476,12 @@ mock_image_digest_2: Final[str] = generate_digest()
                     },
                 ],
             ),
-            pytest.raises(InvalidRenovateUpgradesData, match=r"depTypes.+is a required property"),
+            "depTypes.+is a required property",
             id="missing-depTypes-property",
         ),
         pytest.param(
             json.dumps([{"depName": TASK_BUNDLE_CLONE}]),
-            pytest.raises(InvalidRenovateUpgradesData, match=r"is a required property"),
+            "is a required property",
             id="missing-multiple-properties",
         ),
         pytest.param(
@@ -650,8 +642,8 @@ mock_image_digest_2: Final[str] = generate_digest()
     ],
 )
 def test_clean_upgrades(upgrades_json_s, expected, monkeypatch):
-    if isinstance(expected, RaisesContext):
-        with expected:
+    if isinstance(expected, str):
+        with pytest.raises(InvalidRenovateUpgradesData, match=expected):
             clean_upgrades(upgrades_json_s)
     else:
         if '"set_local_test",' in upgrades_json_s:

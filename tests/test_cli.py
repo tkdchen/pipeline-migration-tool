@@ -282,7 +282,7 @@ class TestMigrateSingleTaskBundleUpgrade:
         # This change simulates that behavior.
         monkeypatch.chdir(tmp_path)
 
-        cli_cmd = ["pmt", "-u", json.dumps(tb_upgrades)]
+        cli_cmd = ["pmt", "migrate", "-u", json.dumps(tb_upgrades)]
 
         if use_linked_migrations:
             test_data = MockRegistry.test_data[0]
@@ -330,7 +330,7 @@ class TestMigrateSingleTaskBundleUpgrade:
 
 
 def test_entry_point_should_catch_error(monkeypatch, caplog):
-    cli_cmd = ["pmt", "--use-legacy-resolver", "-u", json.dumps(UPGRADES)]
+    cli_cmd = ["pmt", "migrate", "--use-legacy-resolver", "-u", json.dumps(UPGRADES)]
     monkeypatch.setattr("sys.argv", cli_cmd)
     assert entry_point() == 1
     assert "Cannot do migration for pipeline." in caplog.text
@@ -381,7 +381,7 @@ def test_entry_point_should_catch_error(monkeypatch, caplog):
     ],
 )
 def test_cli_stops_if_input_upgrades_is_invalid(upgrades, expected_err_msgs, monkeypatch, caplog):
-    cli_cmd = ["pmt", "-u", upgrades]
+    cli_cmd = ["pmt", "migrate", "-u", upgrades]
     monkeypatch.setattr("sys.argv", cli_cmd)
     assert entry_point() == 1
     for err_msg in expected_err_msgs:
@@ -390,7 +390,7 @@ def test_cli_stops_if_input_upgrades_is_invalid(upgrades, expected_err_msgs, mon
 
 @pytest.mark.parametrize("upgrades", ["", "[]", "[{}]"])
 def test_do_nothing_if_input_upgrades_is_empty(upgrades, monkeypatch):
-    cli_cmd = ["pmt", "-u", upgrades]
+    cli_cmd = ["pmt", "migrate", "-u", upgrades]
     monkeypatch.setattr("sys.argv", cli_cmd)
 
     called = [False]

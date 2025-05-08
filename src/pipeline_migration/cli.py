@@ -128,24 +128,7 @@ def clean_upgrades(input_upgrades: str) -> list[dict[str, Any]]:
     return cleaned_upgrades
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Pipeline migration tool for Konflux CI.")
-    parser.add_argument(
-        "-u",
-        "--renovate-upgrades",
-        required=True,
-        metavar="JSON_STR",
-        help="A JSON string converted from Renovate template field upgrades.",
-    )
-    parser.add_argument(
-        "-l",
-        "--use-legacy-resolver",
-        action="store_true",
-        help="Use legacy resolver to fetch migrations.",
-    )
-
-    args = parser.parse_args()
-
+def action_migrate(args) -> None:
     if args.use_legacy_resolver:
         resolver_class = SimpleIterationResolver
     else:
@@ -165,6 +148,35 @@ def main() -> None:
             )
     else:
         logger.info("Empty input upgrades.")
+
+
+def create_cli_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Pipeline migration tool for Konflux CI.")
+    subparser = parser.add_subparsers(title="subcommands to manage build pipelines", required=True)
+    migrate_parser = subparser.add_parser(
+        "migrate", help="Discover and apply migrations for given task bundles upgrades."
+    )
+    migrate_parser.add_argument(
+        "-u",
+        "--renovate-upgrades",
+        required=True,
+        metavar="JSON_STR",
+        help="A JSON string converted from Renovate template field upgrades.",
+    )
+    migrate_parser.add_argument(
+        "-l",
+        "--use-legacy-resolver",
+        action="store_true",
+        help="Use legacy resolver to fetch migrations.",
+    )
+    migrate_parser.set_defaults(action=action_migrate)
+    return parser
+
+
+def main() -> None:
+    parser = create_cli_parser()
+    args = parser.parse_args()
+    args.action(args)
 
 
 def entry_point():

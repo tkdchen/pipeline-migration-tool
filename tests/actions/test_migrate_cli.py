@@ -8,11 +8,12 @@ import responses
 import pytest
 from oras.types import container_type
 
-from pipeline_migration.cli import clean_upgrades, entry_point
-from pipeline_migration.migrate import (
+from pipeline_migration.cli import entry_point
+from pipeline_migration.actions.migrate import (
     ANNOTATION_HAS_MIGRATION,
     ANNOTATION_PREVIOUS_MIGRATION_BUNDLE,
     InvalidRenovateUpgradesData,
+    clean_upgrades,
 )
 from pipeline_migration.registry import (
     Container,
@@ -25,7 +26,7 @@ from pipeline_migration.registry import (
 )
 
 from pipeline_migration.utils import YAMLStyle, load_yaml, dump_yaml
-from tests.test_migrate import APP_IMAGE_REPO, TASK_BUNDLE_CLONE
+from tests.actions.test_migrate import APP_IMAGE_REPO, TASK_BUNDLE_CLONE
 from tests.utils import generate_digest, generate_git_sha
 
 
@@ -236,7 +237,7 @@ class TestMigrateSingleTaskBundleUpgrade:
         monkeypatch,
         tmp_path,
     ):
-        monkeypatch.setattr("pipeline_migration.migrate.Registry", MockRegistry)
+        monkeypatch.setattr("pipeline_migration.actions.migrate.Registry", MockRegistry)
         self._mock_quay_list_tags()
 
         pipeline_file = self._mock_pipeline_file(tmp_path, pipeline_yaml_with_various_indent_styles)
@@ -398,7 +399,7 @@ def test_do_nothing_if_input_upgrades_is_empty(upgrades, monkeypatch):
     def _migrate(*args, **kwargs):
         called[0] = True
 
-    monkeypatch.setattr("pipeline_migration.cli.migrate", _migrate)
+    monkeypatch.setattr("pipeline_migration.actions.migrate", _migrate)
 
     assert entry_point() is None
     assert not called[0]

@@ -12,7 +12,7 @@ import responses
 import pytest
 from ruamel.yaml import YAML
 
-from pipeline_migration.migrate import (
+from pipeline_migration.actions.migrate import (
     ANNOTATION_HAS_MIGRATION,
     ANNOTATION_IS_MIGRATION,
     ANNOTATION_TRUTH_VALUE,
@@ -209,7 +209,7 @@ class TestResolvePipeline:
 
         assert tasks[-1]["name"] == "test"
 
-    @patch("pipeline_migration.migrate.dump_yaml")
+    @patch("pipeline_migration.actions.migrate.dump_yaml")
     def test_do_not_save_if_pipeline_is_not_modified(
         self, mock_dump_yaml, pipeline_and_run_yaml, tmp_path
     ):
@@ -496,7 +496,7 @@ class TestResolveMigrations:
             return script_content
 
         monkeypatch.setattr(
-            "pipeline_migration.migrate.fetch_migration_file", _fetch_migration_file
+            "pipeline_migration.actions.migrate.fetch_migration_file", _fetch_migration_file
         )
 
         manager.resolve_migrations()

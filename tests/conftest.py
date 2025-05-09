@@ -12,7 +12,7 @@ from pipeline_migration.registry import (
     MEDIA_TYPE_OCI_IMAGE_LAYER_V1_TAR_GZ,
     MEDIA_TYPE_OCI_IMAGE_MANIFEST_V1,
 )
-from pipeline_migration.migrate import (
+from pipeline_migration.actions.migrate import (
     ANNOTATION_HAS_MIGRATION,
     ANNOTATION_IS_MIGRATION,
     ANNOTATION_PREVIOUS_MIGRATION_BUNDLE,

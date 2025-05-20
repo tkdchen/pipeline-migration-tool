@@ -102,6 +102,10 @@ class InvalidRenovateUpgradesData(ValueError):
     """Raise this error if any required data is missing in the given Renovate upgrades"""
 
 
+class NotAPipelineFile(Exception):
+    """Raise if a file does not include a pipeline definition"""
+
+
 @contextmanager
 def resolve_pipeline(pipeline_file: FilePath) -> Generator[FilePath, Any, None]:
     """Yield resolved pipeline file
@@ -109,12 +113,14 @@ def resolve_pipeline(pipeline_file: FilePath) -> Generator[FilePath, Any, None]:
     :param pipeline_file:
     :type pipeline_file: str
     :return: a generator yielding a file containing the pipeline definition.
+    :raises NotAPipelineFile: if a YAML file is not a Pipeline definition or a
+        PipelineRun with embedded pipelineSpec.
     """
     yaml_style = YAMLStyle.detect(pipeline_file)
     origin_pipeline = load_yaml(pipeline_file)
 
     if not isinstance(origin_pipeline, dict):
-        raise ValueError(f"Given file {pipeline_file} is not a YAML mapping.")
+        raise NotAPipelineFile(f"Given file {pipeline_file} is not a YAML mapping.")
 
     kind = origin_pipeline.get("kind")
     if kind == TEKTON_KIND_PIPELINE:
@@ -142,13 +148,13 @@ def resolve_pipeline(pipeline_file: FilePath) -> Generator[FilePath, Any, None]:
             # pointing to YAML file under the .tekton/.
             # In this case, Renovate should not handle the given file as a package file since
             # there is no task bundle references.
-            raise ValueError("PipelineRun definition seems not embedded.")
+            raise NotAPipelineFile("PipelineRun definition seems not embedded.")
         else:
-            raise ValueError(
+            raise NotAPipelineFile(
                 "PipelineRun .spec field includes neither .pipelineSpec nor .pipelineRef field."
             )
     else:
-        raise ValueError(
+        raise NotAPipelineFile(
             f"Given file {pipeline_file} does not have knownn kind Pipeline or PipelineRun."
         )
 

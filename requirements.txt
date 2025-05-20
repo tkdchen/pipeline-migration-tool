@@ -126,6 +126,10 @@ oras==0.2.31 \
     --hash=sha256:95c0a341359458747c2946dab47d584cc444d1f9d379b6d63fb7a84cabc54de4 \
     --hash=sha256:b5541f6ae36191027af2c9cfbaef273709a8c860954879b6564f11e03b72007d
     # via pipeline-migration-tool (pyproject.toml)
+packaging==25.0 \
+    --hash=sha256:29572ef2b1f17581046b3a2227d5c611fb25ec70ca1ba8554b24b0e69331a484 \
+    --hash=sha256:d443872c98d677bf60f6a1f2f8c1cb748e8fe762d2bf9d3148b5599295b0fc4f
+    # via pipeline-migration-tool (pyproject.toml)
 referencing==0.36.2 \
     --hash=sha256:df2e89862cd09deabbdba16944cc3f10feb6b3e6f18e902f7cc25609a34775aa \
     --hash=sha256:e8699adbbf8b5c7de96d8ffa0eb5c158b3beafce084968e2ea8bb08c6794dcd0

@@ -11,6 +11,8 @@ from requests.models import Response as Response
 
 from pipeline_migration.types import AnnotationsT, ImageIndexT, DescriptorT
 
+REGISTRY: Final = "quay.io"
+
 MEDIA_TYPE_OCI_EMTPY_V1: Final = "application/vnd.oci.empty.v1+json"
 MEDIA_TYPE_OCI_IMAGE_CONFIG_V1: Final = "application/vnd.oci.image.config.v1+json"
 MEDIA_TYPE_OCI_IMAGE_INDEX_V1: Final = "application/vnd.oci.image.index.v1+json"

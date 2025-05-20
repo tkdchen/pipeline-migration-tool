@@ -16,6 +16,7 @@ from pipeline_migration.actions.migrate import (
     ANNOTATION_HAS_MIGRATION,
     ANNOTATION_IS_MIGRATION,
     ANNOTATION_TRUTH_VALUE,
+    NotAPipelineFile,
     determine_task_bundle_upgrades_range,
     fetch_migration_file,
     IncorrectMigrationAttachment,
@@ -239,14 +240,14 @@ class TestResolvePipeline:
             """
         )
         pipeline_file.write_text(content)
-        with pytest.raises(ValueError, match="PipelineRun definition seems not embedded"):
+        with pytest.raises(NotAPipelineFile, match="PipelineRun definition seems not embedded"):
             with resolve_pipeline(pipeline_file):
                 pass
 
     def test_given_file_is_not_yaml_file(self, tmp_path):
         pipeline_file = tmp_path / "invalid.file"
         pipeline_file.write_text("hello world")
-        with pytest.raises(ValueError, match="not a YAML mapping"):
+        with pytest.raises(NotAPipelineFile, match="not a YAML mapping"):
             with resolve_pipeline(pipeline_file):
                 pass
 
@@ -262,7 +263,7 @@ class TestResolvePipeline:
             """
         )
         pipeline_file.write_text(content)
-        with pytest.raises(ValueError, match="neither .pipelineSpec nor .pipelineRef field"):
+        with pytest.raises(NotAPipelineFile, match="neither .pipelineSpec nor .pipelineRef field"):
             with resolve_pipeline(pipeline_file):
                 pass
 
@@ -275,7 +276,9 @@ class TestResolvePipeline:
             """
         )
         pipeline_file.write_text(content)
-        with pytest.raises(ValueError, match="does not have knownn kind Pipeline or PipelineRun"):
+        with pytest.raises(
+            NotAPipelineFile, match="does not have knownn kind Pipeline or PipelineRun"
+        ):
             with resolve_pipeline(pipeline_file):
                 pass
 

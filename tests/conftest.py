@@ -18,7 +18,7 @@ from pipeline_migration.actions.migrate import (
     ANNOTATION_PREVIOUS_MIGRATION_BUNDLE,
     ANNOTATION_TRUTH_VALUE,
 )
-from tests.utils import generate_digest
+from tests.utils import generate_digest, RepoPath
 
 
 @pytest.fixture
@@ -121,9 +121,35 @@ def pipeline_yaml():
         spec:
           tasks:
           - name: clone
-            image: debian:latest
-            script: |
-              git clone https://git.host/project
+            taskRef:
+              resolver: bundles
+              params:
+              - name: name
+                value: clone
+              - name: bundle
+                value: bundle_ref
+              - name: kind
+                value: task
+          - name: test
+            taskRef:
+              resolver: bundles
+              params:
+              - name: name
+                value: test
+              - name: bundle
+                value: bundle_ref
+              - name: kind
+                value: task
+          - name: build
+            taskRef:
+              resolver: bundles
+              params:
+              - name: name
+                value: buildah-oci-ta
+              - name: bundle
+                value: bundle_ref
+              - name: kind
+                value: task
         """
     )
 
@@ -163,9 +189,18 @@ def pipeline_run_yaml() -> str:
         spec:
           pipelineSpec:
             params:
+            - name: git-url
             tasks:
             - name: clone
-            - name: build
+              taskRef:
+                resolver: bundles
+                params:
+                - name: name
+                  value: clone
+                - name: bundle
+                  value: bundle_ref
+                - name: kind
+                  value: task
         """
     )
 
@@ -179,3 +214,24 @@ def pipeline_and_run_yaml(request, pipeline_yaml, pipeline_run_yaml) -> str:
             return pipeline_run_yaml
         case _:
             raise ValueError(f"Unexpected param {request.param}")
+
+
+@pytest.fixture
+def component_a_repo(tmp_path, pipeline_run_yaml) -> RepoPath:
+    print("fixture component a repo")
+    component_a_tekton = tmp_path / "component_a" / ".tekton"
+    component_a_tekton.mkdir(parents=True)
+    yaml_file = component_a_tekton / "pr.yaml"
+    yaml_file.write_text(pipeline_run_yaml)
+    yaml_file = component_a_tekton / "push.yaml"
+    yaml_file.write_text(pipeline_run_yaml)
+    return RepoPath(component_a_tekton.parent)
+
+
+@pytest.fixture
+def component_b_repo(tmp_path, pipeline_yaml) -> RepoPath:
+    component_b_tekton = tmp_path / "component_b" / ".tekton"
+    component_b_tekton.mkdir(parents=True)
+    yaml_file = component_b_tekton / "build-pipeline.yaml"
+    yaml_file.write_text(pipeline_yaml)
+    return RepoPath(component_b_tekton.parent)

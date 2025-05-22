@@ -82,7 +82,7 @@ class YAMLStyle:
         return cls(indentation=indentation)
 
 
-def create_yaml_obj(style: YAMLStyle | None = None):
+def create_yaml_obj(style: YAMLStyle | None = None) -> YAML:
     yaml = YAML()
     if style is None:
         return yaml
@@ -99,9 +99,9 @@ def create_yaml_obj(style: YAMLStyle | None = None):
     return yaml
 
 
-def load_yaml(yaml_file: FilePath) -> Any:
+def load_yaml(yaml_file: FilePath, style: YAMLStyle | None = None) -> Any:
     with open(yaml_file, "r", encoding="utf-8") as f:
-        return create_yaml_obj().load(f)
+        return create_yaml_obj(style).load(f)
 
 
 def dump_yaml(yaml_file: FilePath, data: Any, style: YAMLStyle | None = None) -> None:

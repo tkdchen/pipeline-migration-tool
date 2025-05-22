@@ -119,6 +119,10 @@ def pipeline_yaml():
         metadata:
           name: pl
         spec:
+          params:
+          - name: git-url
+          - name: revision
+            default: "main"
           tasks:
           - name: clone
             taskRef:
@@ -187,9 +191,16 @@ def pipeline_run_yaml() -> str:
         metadata:
           name: docker-build
         spec:
+          params:
+          - name: git-url
+            value: '{{source_url}}'
+          - name: revision
+            value: '{{revision}}'
           pipelineSpec:
             params:
             - name: git-url
+            - name: revision
+              default: "main"
             tasks:
             - name: clone
               taskRef:

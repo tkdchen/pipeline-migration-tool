@@ -210,6 +210,24 @@ class TestResolvePipeline:
 
         assert tasks[-1]["name"] == "test"
 
+    def test_formatting_ensure_quotes_are_preserved(self, pipeline_and_run_yaml, tmp_path):
+        pipeline_file = tmp_path / "file.yaml"
+        pipeline_file.write_text(pipeline_and_run_yaml)
+
+        original_yaml = pipeline_file.read_text().rstrip()
+
+        with resolve_pipeline(pipeline_file) as file_path:
+            # Make changes to ensure the resolve_pipeline writes content
+            # to the original pipeline file
+            with open(file_path, "r") as stream:
+                content = stream.read()
+            with open(file_path, "w+") as stream:
+                stream.write("---\n")
+                stream.write(content)
+
+        changed_yaml = pipeline_file.read_text().strip("-\n")
+        assert changed_yaml == original_yaml
+
     @patch("pipeline_migration.actions.migrate.dump_yaml")
     def test_do_not_save_if_pipeline_is_not_modified(
         self, mock_dump_yaml, pipeline_and_run_yaml, tmp_path

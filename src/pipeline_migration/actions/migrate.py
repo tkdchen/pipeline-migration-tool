@@ -117,7 +117,7 @@ def resolve_pipeline(pipeline_file: FilePath) -> Generator[FilePath, Any, None]:
         PipelineRun with embedded pipelineSpec.
     """
     yaml_style = YAMLStyle.detect(pipeline_file)
-    origin_pipeline = load_yaml(pipeline_file)
+    origin_pipeline = load_yaml(pipeline_file, style=yaml_style)
 
     if not isinstance(origin_pipeline, dict):
         raise NotAPipelineFile(f"Given file {pipeline_file} is not a YAML mapping.")
@@ -127,7 +127,7 @@ def resolve_pipeline(pipeline_file: FilePath) -> Generator[FilePath, Any, None]:
         origin_checksum = file_checksum(pipeline_file)
         yield pipeline_file
         if file_checksum(pipeline_file) != origin_checksum:
-            pl_yaml = load_yaml(pipeline_file)
+            pl_yaml = load_yaml(pipeline_file, style=yaml_style)
             dump_yaml(pipeline_file, pl_yaml, style=yaml_style)
     elif kind == TEKTON_KIND_PIPELINE_RUN:
         spec = origin_pipeline.get("spec") or {}
@@ -136,11 +136,11 @@ def resolve_pipeline(pipeline_file: FilePath) -> Generator[FilePath, Any, None]:
             fd, temp_pipeline_file = tempfile.mkstemp(suffix="-pipeline")
             os.close(fd)
             pipeline = {"spec": spec["pipelineSpec"]}
-            dump_yaml(temp_pipeline_file, pipeline)
+            dump_yaml(temp_pipeline_file, pipeline, style=yaml_style)
             origin_checksum = file_checksum(temp_pipeline_file)
             yield temp_pipeline_file
             if file_checksum(temp_pipeline_file) != origin_checksum:
-                modified_pipeline = load_yaml(temp_pipeline_file)
+                modified_pipeline = load_yaml(temp_pipeline_file, style=yaml_style)
                 spec["pipelineSpec"] = modified_pipeline["spec"]
                 dump_yaml(pipeline_file, origin_pipeline, style=yaml_style)
         elif "pipelineRef" in spec:

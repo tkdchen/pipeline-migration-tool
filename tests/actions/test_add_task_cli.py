@@ -223,12 +223,17 @@ def test_set_execution_order(request, depended_tasks, component_b_repo, caplog, 
     [
         pytest.param([], [], id="no-task-param-to-add"),
         pytest.param(
-            ["verbose,true"], [{"name": "verbose", "value": "true"}], id="add-single-param"
+            ["verbose=true"], [{"name": "verbose", "value": "true"}], id="add-single-param"
         ),
         pytest.param(
-            ["verbose,true", "ignore,rule1"],
+            ["verbose=true", "ignore=rule1"],
             [{"name": "verbose", "value": "true"}, {"name": "ignore", "value": "rule1"}],
             id="add-multiple-params",
+        ),
+        pytest.param(
+            ["verbose=true", "ignore=rule=1"],
+            [{"name": "verbose", "value": "true"}, {"name": "ignore", "value": "rule=1"}],
+            id="value-includes-equal-sign",
         ),
         pytest.param(["verbose"], [], id="malformed-param-missing-comma"),
     ],
@@ -307,7 +312,7 @@ def test_add_task_with_params_and_run_after_clone(component_b_repo, monkeypatch)
         "--run-after",
         "build",
         "--param",
-        "image_url,$(build.results.image_url)",
+        "image_url=$(build.results.image_url)",
         "--git-add",
         TASK_NAME,
         str(component_b_repo.tekton_dir),

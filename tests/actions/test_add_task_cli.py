@@ -33,16 +33,21 @@ def check_updated_pipeline(
     file_path: Path,
     task_name: str,
     bundle_ref: str,
+    pipeline_task_name: str = "",
     skip_checks: bool = False,
     run_after: list[str] | None = None,
     params: list[dict[str, str]] | None = None,
 ) -> None:
     with resolve_pipeline(file_path) as pipeline_file:
         doc = load_yaml(pipeline_file)
-        tasks = [item for item in doc["spec"]["tasks"] if item["name"] == task_name]
+        expected_pipeline_task_name = pipeline_task_name or task_name
+        print(dict(doc))
+        tasks = [
+            item for item in doc["spec"]["tasks"] if item["name"] == expected_pipeline_task_name
+        ]
         assert len(tasks) == 1
         expected_task_config: dict[str, Any] = {
-            "name": task_name,
+            "name": expected_pipeline_task_name,
             "taskRef": {
                 "resolver": "bundles",
                 "params": [
@@ -410,3 +415,53 @@ def test_skip_adding_task_if_exists(
     assert (
         git_index == expected_yaml_files
     ), "only PipelineRuns should be updated from component-b repo"
+
+
+@responses.activate
+@pytest.mark.parametrize(
+    "pipeline_task_name,actual_task_name,expected_pipeline_task_name,expected_actual_task_name",
+    [
+        pytest.param(None, "check", "check", "check", id="use-actual-task-name"),
+        pytest.param(None, "check-oci-ta", "check", "check-oci-ta", id="auto-remove-oci-ta-suffix"),
+        pytest.param("do-check", "check", "do-check", "check", id="set-individually"),
+        pytest.param(
+            "do-check",
+            "check-oci-ta",
+            "do-check",
+            "check-oci-ta",
+            id="set-individually-with-ta-task",
+        ),
+    ],
+)
+def test_pipeline_and_actual_task_name_combinations(
+    pipeline_task_name,
+    actual_task_name,
+    expected_pipeline_task_name,
+    expected_actual_task_name,
+    component_b_repo,
+    monkeypatch,
+):
+    mock_http_requests_for_handling_bundle_ref(BUNDLE_REF)
+
+    cmd = [
+        "pmt",
+        "add-task",
+        "--bundle-ref",
+        BUNDLE_REF,
+        actual_task_name,
+        str(component_b_repo.tekton_dir),
+    ]
+    if pipeline_task_name:
+        cmd.append("--pipeline-task-name")
+        cmd.append(pipeline_task_name)
+
+    monkeypatch.setattr("sys.argv", cmd)
+    entry_point()
+
+    for yaml_file in component_b_repo.tekton_dir.glob("*.yaml"):
+        check_updated_pipeline(
+            yaml_file,
+            expected_actual_task_name,
+            BUNDLE_REF,
+            pipeline_task_name=expected_pipeline_task_name,
+        )

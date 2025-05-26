@@ -86,9 +86,11 @@ def register_cli(subparser) -> None:
     )
     add_task_parser.add_argument(
         "task",
-        help="Konflux task name to add. This is the actual task name defined in "
-        "konflux-ci/build-definitions. If a trusted artifact task is being added, "
-        "ensure the task name has suffix -oci-ta, e.g. buildah-oci-ta.",
+        help="Konflux task name. This is the actual task name defined in "
+        "konflux-ci/build-definitions. By default, this name is also used as the pipeline task "
+        "name. If a trusted artifact task is being added, suffix -oci-ta is removed automatically "
+        "from the name and the result is used as the pipeline task name. To specify a pipeline "
+        "task name explicitly, use option --pipeline-task-name.",
     )
     add_task_parser.add_argument(
         "file_or_dir",
@@ -102,11 +104,8 @@ def register_cli(subparser) -> None:
         "-n",
         "--pipeline-task-name",
         metavar="NAME",
-        help="Task name used in pipeline to configure the added task, in case it should be "
-        "different from the task name inside the bundle. For example, build task has name "
-        "build-container in the pipeline, but the actual task name is buildah inside bundle. "
-        "This is also useful for adding trusted artifact tasks, e.g. name the task as "
-        "sast-coverity-check but the actual task name is sast-coverity-check-oci-ta.",
+        help="Specify an alternative name for the task configured in the pipeline. If omitted, "
+        "name is set according to the given actual task name.",
     )
     add_task_parser.add_argument(
         "-a",
@@ -158,7 +157,7 @@ def register_cli(subparser) -> None:
 
 def action(args) -> None:
     actual_task_name: Final = args.task
-    pipeline_task_name: Final = args.pipeline_task_name or args.task
+    pipeline_task_name: Final = args.pipeline_task_name or args.task.removesuffix("-oci-ta")
 
     bundle_ref = args.bundle_ref
     if not bundle_ref:

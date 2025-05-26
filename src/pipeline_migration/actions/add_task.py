@@ -199,7 +199,7 @@ def action(args) -> None:
 
     for original_abs_path, pipeline_file in search_pipeline_files(search_places):
         style = YAMLStyle.detect(pipeline_file)
-        doc = load_yaml(pipeline_file)
+        doc = load_yaml(pipeline_file, style)
         tasks = doc["spec"]["tasks"]
 
         existing_pipeline_task_names = set([])

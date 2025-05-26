@@ -25,59 +25,72 @@ IMAGE_DIGEST: Final = generate_digest()
 
 @responses.activate
 @pytest.mark.parametrize(
-    "bundle_ref,expected",
+    "bundle_ref,responded_tags,expected_error",
     [
-        ["", pytest.raises(ArgumentTypeError, match="is not a valid image reference")],
+        ["", None, pytest.raises(ArgumentTypeError, match="is not a valid image reference")],
         [
             "some-registry.io/app@sha256:1234",
+            None,
             pytest.raises(ArgumentTypeError, match="only support adding Konflux tasks"),
         ],
-        ["quay.io/org/app@sha256:1234", pytest.raises(ArgumentTypeError, match="missing tag")],
-        ["quay.io/org/app:0.1", pytest.raises(ArgumentTypeError, match="missing digest")],
-        [f"quay.io/org/app:0.1@{IMAGE_DIGEST}", "tag does not exist"],
-        [f"quay.io/org/app:0.1@{IMAGE_DIGEST}", "mismatch digest"],
-        [f"quay.io/org/app:0.1@{IMAGE_DIGEST}", "valid"],
+        [
+            "quay.io/org/app@sha256:1234",
+            None,
+            pytest.raises(ArgumentTypeError, match="missing tag"),
+        ],
+        ["quay.io/org/app:0.1", None, pytest.raises(ArgumentTypeError, match="missing digest")],
+        pytest.param(
+            f"quay.io/org/app:0.1@{IMAGE_DIGEST}",
+            [],
+            pytest.raises(ArgumentTypeError, match="tag 0.1 does not exist"),
+            id="tag-does-not-exist-in-image-repo",
+        ),
+        pytest.param(
+            f"quay.io/org/app:0.1@{IMAGE_DIGEST}",
+            [{"name": "0.1", "manifest_digest": generate_digest()}],
+            pytest.raises(ArgumentTypeError, match="Mismatch digest"),
+            id="mismatch-digest",
+        ),
+        pytest.param(
+            f"quay.io/org/app:0.1@{IMAGE_DIGEST}",
+            [{"name": "0.1", "manifest_digest": IMAGE_DIGEST}],
+            None,
+            id="valid-image-ref",
+        ),
+        pytest.param(
+            f"quay.io/org/app:latest@{IMAGE_DIGEST}",
+            [{"name": "latest", "manifest_digest": IMAGE_DIGEST}],
+            None,
+            id="valid-image-ref-with-latest-tag",
+        ),
+        pytest.param(
+            f"quay.io/org/app:latest@{IMAGE_DIGEST}",
+            [{"name": "latest", "manifest_digest": generate_digest()}],
+            pytest.raises(ArgumentTypeError, match="Mismatch digest"),
+            id="input-image-ref-with-mismatch-digest-by-latest-tag",
+        ),
+        pytest.param(
+            f"quay.io/org/app:latest@{IMAGE_DIGEST}",
+            [],
+            pytest.raises(ArgumentTypeError, match="tag latest does not exist"),
+            id="latest-tag-does-not-exist-in-image-repo",
+        ),
     ],
 )
-def test_konflux_task_bundle_reference(bundle_ref, expected) -> None:
-    if isinstance(expected, str):
-        if expected == "tag does not exist":
-            params = {"page": 1, "onlyActiveTags": "true", "specificTag": "0.1"}
-            responses.get(
-                "https://quay.io/api/v1/repository/org/app/tag/",
-                json={"tags": [], "has_additional": False},
-                match=[query_param_matcher(params)],
-            )
-            with pytest.raises(ArgumentTypeError, match="tag 0.1 does not exist"):
-                konflux_task_bundle_reference(bundle_ref)
-        elif expected == "mismatch digest":
-            params = {"page": 1, "onlyActiveTags": "true", "specificTag": "0.1"}
-            responses.get(
-                "https://quay.io/api/v1/repository/org/app/tag/",
-                json={
-                    "tags": [{"name": "0.1", "manifest_digest": generate_digest()}],
-                    "has_additional": False,
-                },
-                match=[query_param_matcher(params)],
-            )
-            with pytest.raises(
-                ArgumentTypeError, match=r"Mismatch digest.+0\.1 points to a different digest"
-            ):
-                konflux_task_bundle_reference(bundle_ref)
-        elif expected == "valid":
-            params = {"page": 1, "onlyActiveTags": "true", "specificTag": "0.1"}
-            responses.get(
-                "https://quay.io/api/v1/repository/org/app/tag/",
-                json={
-                    "tags": [{"name": "0.1", "manifest_digest": IMAGE_DIGEST}],
-                    "has_additional": False,
-                },
-                match=[query_param_matcher(params)],
-            )
-            assert konflux_task_bundle_reference(bundle_ref) == bundle_ref
-    else:
-        with expected:
+def test_konflux_task_bundle_reference(bundle_ref, responded_tags, expected_error) -> None:
+    if responded_tags is not None:
+        tag = bundle_ref.split("@")[0].split(":")[-1]
+        params = {"page": "1", "onlyActiveTags": "true", "specificTag": tag}
+        responses.get(
+            "https://quay.io/api/v1/repository/org/app/tag/",
+            json={"tags": responded_tags, "has_additional": False},
+            match=[query_param_matcher(params)],
+        )
+    if expected_error:
+        with expected_error:
             konflux_task_bundle_reference(bundle_ref)
+    else:
+        assert bundle_ref == konflux_task_bundle_reference(bundle_ref)
 
 
 class TestGitAdd:

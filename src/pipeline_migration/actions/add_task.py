@@ -7,7 +7,6 @@ from collections.abc import Generator, Iterable
 from pathlib import Path
 from typing import Any, Final
 
-import oras.defaults
 import requests
 from packaging.version import parse as parse_version
 from ruamel.yaml.scalarstring import DoubleQuotedScalarString
@@ -347,14 +346,14 @@ class KonfluxBuildDefinitions:
             raise ValueError(f"{bundle_ref} is not a valid image reference: {str(e)}")
         if c.registry != REGISTRY:
             raise ValueError("Currently only support adding Konflux tasks from quay.io.")
-        if c.tag == oras.defaults.default_tag:
-            raise ValueError(
-                f"missing tag in {bundle_ref}. Task bundle reference must have both tag and digest."
-            )
         if not c.digest:
             raise ValueError(
                 f"missing digest in {bundle_ref}. Task bundle reference must have both "
                 "tag and digest."
+            )
+        if f":{c.tag}@" not in bundle_ref:
+            raise ValueError(
+                f"missing tag in {bundle_ref}. Task bundle reference must have both tag and digest."
             )
         tag_info = get_active_tag(c, c.tag)
         if tag_info is None:

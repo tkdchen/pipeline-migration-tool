@@ -345,7 +345,7 @@ class KonfluxBuildDefinitions:
         except ValueError as e:
             # The underlying oras Container.parse raises ValueError
             raise ValueError(f"{bundle_ref} is not a valid image reference: {str(e)}")
-        if c.registry == oras.defaults.registry.index_name:
+        if c.registry != REGISTRY:
             raise ValueError("Currently only support adding Konflux tasks from quay.io.")
         if c.tag == oras.defaults.default_tag:
             raise ValueError(

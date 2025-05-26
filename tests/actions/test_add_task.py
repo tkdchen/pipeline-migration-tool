@@ -29,7 +29,7 @@ IMAGE_DIGEST: Final = generate_digest()
     [
         ["", pytest.raises(ArgumentTypeError, match="is not a valid image reference")],
         [
-            "org/app@sha256:1234",
+            "some-registry.io/app@sha256:1234",
             pytest.raises(ArgumentTypeError, match="only support adding Konflux tasks"),
         ],
         ["quay.io/org/app@sha256:1234", pytest.raises(ArgumentTypeError, match="missing tag")],

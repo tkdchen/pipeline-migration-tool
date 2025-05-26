@@ -229,7 +229,6 @@ def pipeline_and_run_yaml(request, pipeline_yaml, pipeline_run_yaml) -> str:
 
 @pytest.fixture
 def component_a_repo(tmp_path, pipeline_run_yaml) -> RepoPath:
-    print("fixture component a repo")
     component_a_tekton = tmp_path / "component_a" / ".tekton"
     component_a_tekton.mkdir(parents=True)
     yaml_file = component_a_tekton / "pr.yaml"

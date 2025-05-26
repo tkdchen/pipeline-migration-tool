@@ -41,7 +41,6 @@ def check_updated_pipeline(
     with resolve_pipeline(file_path) as pipeline_file:
         doc = load_yaml(pipeline_file)
         expected_pipeline_task_name = pipeline_task_name or task_name
-        print(dict(doc))
         tasks = [
             item for item in doc["spec"]["tasks"] if item["name"] == expected_pipeline_task_name
         ]

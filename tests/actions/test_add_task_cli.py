@@ -59,7 +59,7 @@ def check_updated_pipeline(
         }
         if skip_checks:
             expected_task_config["when"] = [
-                {"input": "$(params.skip-checks)", "operator": "in", "values": [False]}
+                {"input": "$(params.skip-checks)", "operator": "in", "values": ["false"]}
             ]
         if run_after:
             expected_task_config["runAfter"] = run_after[:]

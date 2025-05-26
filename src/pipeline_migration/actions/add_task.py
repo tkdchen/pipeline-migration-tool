@@ -10,6 +10,7 @@ from typing import Any, Final
 import oras.defaults
 import requests
 from packaging.version import parse as parse_version
+from ruamel.yaml.scalarstring import DoubleQuotedScalarString
 
 from pipeline_migration.actions.migrate import NotAPipelineFile, resolve_pipeline
 from pipeline_migration.quay import get_active_tag
@@ -184,7 +185,11 @@ def action(args) -> None:
         task_config["runAfter"] = args.run_after
     if args.skip_checks:
         task_config["when"] = [
-            {"input": "$(params.skip-checks)", "operator": "in", "values": [False]}
+            {
+                "input": "$(params.skip-checks)",
+                "operator": "in",
+                "values": [DoubleQuotedScalarString("false")],
+            }
         ]
 
     search_places = [path for path in args.file_or_dir if path]

@@ -53,7 +53,7 @@ QUAY_NAMESPACE="<quay namespace passed to build-definitions/hack/build-and-push.
 ./hack/integration-test/setup.sh
 
 cd ./hack/integration-test/app
-PMT_LOCAL_TEST=1 pipeline-migration-tool -u "$(cat /tmp/pmt-test-upgrades.txt)"
+PMT_LOCAL_TEST=1 pipeline-migration-tool migrate -u "$(cat /tmp/pmt-test-upgrades.txt)"
 
 # Check if the tool works as expected.
 ```

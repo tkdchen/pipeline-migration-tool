@@ -1,5 +1,12 @@
 import random
 import string
+from pathlib import Path
+
+
+class RepoPath(Path):
+    @property
+    def tekton_dir(self) -> Path:
+        return self / ".tekton"
 
 
 def select_random_chars(n=64):

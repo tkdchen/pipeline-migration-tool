@@ -12,10 +12,11 @@ import responses
 import pytest
 from ruamel.yaml import YAML
 
-from pipeline_migration.migrate import (
+from pipeline_migration.actions.migrate import (
     ANNOTATION_HAS_MIGRATION,
     ANNOTATION_IS_MIGRATION,
     ANNOTATION_TRUTH_VALUE,
+    NotAPipelineFile,
     determine_task_bundle_upgrades_range,
     fetch_migration_file,
     IncorrectMigrationAttachment,
@@ -209,7 +210,25 @@ class TestResolvePipeline:
 
         assert tasks[-1]["name"] == "test"
 
-    @patch("pipeline_migration.migrate.dump_yaml")
+    def test_formatting_ensure_quotes_are_preserved(self, pipeline_and_run_yaml, tmp_path):
+        pipeline_file = tmp_path / "file.yaml"
+        pipeline_file.write_text(pipeline_and_run_yaml)
+
+        original_yaml = pipeline_file.read_text().rstrip()
+
+        with resolve_pipeline(pipeline_file) as file_path:
+            # Make changes to ensure the resolve_pipeline writes content
+            # to the original pipeline file
+            with open(file_path, "r") as stream:
+                content = stream.read()
+            with open(file_path, "w+") as stream:
+                stream.write("---\n")
+                stream.write(content)
+
+        changed_yaml = pipeline_file.read_text().strip("-\n")
+        assert changed_yaml == original_yaml
+
+    @patch("pipeline_migration.actions.migrate.dump_yaml")
     def test_do_not_save_if_pipeline_is_not_modified(
         self, mock_dump_yaml, pipeline_and_run_yaml, tmp_path
     ):
@@ -239,14 +258,14 @@ class TestResolvePipeline:
             """
         )
         pipeline_file.write_text(content)
-        with pytest.raises(ValueError, match="PipelineRun definition seems not embedded"):
+        with pytest.raises(NotAPipelineFile, match="PipelineRun definition seems not embedded"):
             with resolve_pipeline(pipeline_file):
                 pass
 
     def test_given_file_is_not_yaml_file(self, tmp_path):
         pipeline_file = tmp_path / "invalid.file"
         pipeline_file.write_text("hello world")
-        with pytest.raises(ValueError, match="not a YAML mapping"):
+        with pytest.raises(NotAPipelineFile, match="not a YAML mapping"):
             with resolve_pipeline(pipeline_file):
                 pass
 
@@ -262,7 +281,7 @@ class TestResolvePipeline:
             """
         )
         pipeline_file.write_text(content)
-        with pytest.raises(ValueError, match="neither .pipelineSpec nor .pipelineRef field"):
+        with pytest.raises(NotAPipelineFile, match="neither .pipelineSpec nor .pipelineRef field"):
             with resolve_pipeline(pipeline_file):
                 pass
 
@@ -275,7 +294,9 @@ class TestResolvePipeline:
             """
         )
         pipeline_file.write_text(content)
-        with pytest.raises(ValueError, match="does not have knownn kind Pipeline or PipelineRun"):
+        with pytest.raises(
+            NotAPipelineFile, match="does not have knownn kind Pipeline or PipelineRun"
+        ):
             with resolve_pipeline(pipeline_file):
                 pass
 
@@ -496,7 +517,7 @@ class TestResolveMigrations:
             return script_content
 
         monkeypatch.setattr(
-            "pipeline_migration.migrate.fetch_migration_file", _fetch_migration_file
+            "pipeline_migration.actions.migrate.fetch_migration_file", _fetch_migration_file
         )
 
         manager.resolve_migrations()

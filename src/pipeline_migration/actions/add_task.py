@@ -95,10 +95,12 @@ def register_cli(subparser) -> None:
     add_task_parser.add_argument(
         "file_or_dir",
         nargs="*",
-        help="Specify pipeline files to where the task is added. "
-        "A pipeline can be included in a PipelineRun definition or a single Pipeline itself. "
-        "Directory path can also be specified alternatively. %(prog)s searches pipelines "
-        "from all YAML files from the first level of the directory.",
+        help="Specify locations from where finding out pipelines to add task. "
+        "A pipeline can be included in a PipelineRun or a single Pipeline definition. "
+        "%(prog)s searches pipelines from given locations by rules, if files are specified, "
+        "search just pipelines from them. If directories are specified, search YAML files from the "
+        "first level of each one. If neither is specified, the location defaults to ./.tekton/ "
+        "directory.",
     )
     add_task_parser.add_argument(
         "-n",

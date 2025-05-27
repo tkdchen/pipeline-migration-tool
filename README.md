@@ -2,6 +2,106 @@
 
 A migration tool does migrations for Konflux pipelines.
 
+Doing migrations is the major feature of pipeline-migration-tool. It auto-discovers migrations for
+given task bundle upgrades and applies found migrations to build pipelines. The pipeline can be
+either included in a `PipelineRun` definition as `spec.pipelineSpec` or a single `Pipeline` defintion.
+
+To make it work, migrations must be attached to corresponding task bundles as OCI artifacts,
+typically with `oras attach`. Let's go deep dive a bit.
+
+* If a task bundle has a migration, it must be annotated with `dev.konflux-ci.task.has-migration: true`
+* A migration must be attached to the bundle with artifact type `text/x-shellscript` and annotated
+  with `dev.konflux-ci.task.is-migration: true`.
+* A task bundle has only one migration.
+* A migration is written as a normal Bash script. Generally, it invokes `yq` to modify the pipelines.
+
+Document [Task Migration]
+(https://github.com/konflux-ci/build-definitions/?tab=readme-ov-file#task-migration) of
+konflux-ci/build-definitions describes the migrations in detail. build-definitions provides a rich
+tool chain and CI for creation, validation and ensuring migrations are available to
+pipeline-migration-tool.
+
+## Commands
+
+Pipeline migration tool supports several sub-commands to maintain the Konflux build pipelines.
+`migrate` is the main one to do migrations. There are a few examples below. For detailed
+information, refer to the help messages by running each one with `-h`.
+
+### To apply migrations:
+
+```bash
+cd path/to/repo
+pipeline-migration-tool migrate -u '<upgrades>'
+```
+
+`upgrades` is a JSON string encoded from a list of mappings. Each mapping includes data for a
+single task bundle upgrade, for example:
+
+```jsonc
+[
+  {
+    "depName": "quay.io/konflux-ci/tekton-catalog/task-init",
+    "currentValue": "0.1",
+    "currentDigest": "sha256:...",
+    "newValue": "0.1",
+    "newDigest": "sha256:...",
+    "packageFile": ".tekton/component-name-pull.yaml",
+    "parentDir": ".tekton",
+    "depTypes": ["tekton-bundle"]
+  },
+  // ...
+]
+```
+
+The field names map to the [Renovate template fields]
+(https://docs.renovatebot.com/templates/#other-available-fields) directly:
+
+* `depName`: `{{depName}}`
+* `currentValue`: `{{currentValue}}`
+* `currentDigest`: `{{currentDigest}}`
+* `newValue`: `{{newValue}}`
+* `newDigest`: `{{newDigest}}`
+* `packageFile`: `{{packageFile}}`
+* `parentDir`: `{{parentDir}}`
+* `depTypes`: `{{depTypes}}`
+
+To generate the list, handlebars built-in each helper of Renovate is used.
+
+pipeline-migration-tool is configured in Konflux Mintmaker as a Renovate post-upgrade command and
+Renovate is responsible for invoke migration tool properly. Then, in general, it is unnecessary for
+Konflux users to run `migrate` by themselves.
+
+### Add a Konflux task to build pipeline
+
+Sub-command `add-task` provides rich options to add a Konflux task to build pipelines in local
+Component repositories. Let's take the task `sast-coverity-check` as an example to see a few
+command usages:
+
+* Add task with latest bundle to pipelines from inside a repository:
+
+  ```bash
+  pipeline-migration-tool add-task sast-coverity-check
+  ```
+
+  where `./.tekton/` is the default location to search pipelines.
+
+* Add task to multiple locations:
+
+  ```bash
+  pipeline-migration-tool add-task sast-coverity-check \
+    /path/to/repo1/pipeline.yaml /path/to/repo2/pipeline-run.yaml ...
+  ```
+
+* Specify alternative task bundle explicitly:
+
+  ```bash
+  pipeline-migration-tool add-task --bundle-ref quay.io/konflux-ci/tekton-catalog/task-sast-coverity-check:0.1@sha256:... \
+    sast-coverity-check \
+    /path/to/repo1/pipeline.yaml /path/to/repo2/pipeline-run.yaml ...
+  ```
+
+Get more information by `pipeline-migration-tool add-task -h`
+
 ## Run tests
 
 ```bash

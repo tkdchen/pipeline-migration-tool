@@ -1,10 +1,16 @@
 # Pipeline Migration Tool
 
-A migration tool does migrations for Konflux pipelines.
+Pipeline migration tool is a command line tool providing several sub-commands
+for Konflux users to manage their build pipelines.
 
-Doing migrations is the major feature of pipeline-migration-tool. It auto-discovers migrations for
-given task bundle upgrades and applies found migrations to build pipelines. The pipeline can be
-either included in a `PipelineRun` definition as `spec.pipelineSpec` or a single `Pipeline` defintion.
+## Commands
+
+### To apply migrations with `migrate`
+
+Applying migrations is the major feature of pipeline-migration-tool. It auto-discovers migrations
+for given task bundle upgrades and applies found migrations to build pipelines. The pipeline can be
+either included in a `PipelineRun` definition as `spec.pipelineSpec` or a single `Pipeline`
+defintion.
 
 To make it work, migrations must be attached to corresponding task bundles as OCI artifacts,
 typically with `oras attach`. Let's go deep dive a bit.
@@ -21,13 +27,11 @@ konflux-ci/build-definitions describes the migrations in detail. build-definitio
 tool chain and CI for creation, validation and ensuring migrations are available to
 pipeline-migration-tool.
 
-## Commands
+pipeline-migration-tool is configured in Konflux Mintmaker as a Renovate post-upgrade command and
+Renovate is responsible for invoke migration tool properly. Then, in general, it is unnecessary for
+Konflux users to run `migrate` by themselves.
 
-Pipeline migration tool supports several sub-commands to maintain the Konflux build pipelines.
-`migrate` is the main one to do migrations. There are a few examples below. For detailed
-information, refer to the help messages by running each one with `-h`.
-
-### To apply migrations:
+To apply migrations, run command:
 
 ```bash
 cd path/to/repo
@@ -67,11 +71,7 @@ The field names map to the [Renovate template fields]
 
 To generate the list, handlebars built-in each helper of Renovate is used.
 
-pipeline-migration-tool is configured in Konflux Mintmaker as a Renovate post-upgrade command and
-Renovate is responsible for invoke migration tool properly. Then, in general, it is unnecessary for
-Konflux users to run `migrate` by themselves.
-
-### Add a Konflux task to build pipeline
+### Add a Konflux task to build pipeline with `add-task`
 
 Sub-command `add-task` provides rich options to add a Konflux task to build pipelines in local
 Component repositories. Let's take the task `sast-coverity-check` as an example to see a few

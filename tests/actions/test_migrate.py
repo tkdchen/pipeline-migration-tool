@@ -3,35 +3,26 @@ import itertools
 import logging
 import subprocess
 from copy import deepcopy
-from pathlib import Path
-from textwrap import dedent
 from typing import Any, Final
-from unittest.mock import patch
 
 import responses
 import pytest
-from ruamel.yaml import YAML
 
 from pipeline_migration.actions.migrate import (
     ANNOTATION_HAS_MIGRATION,
     ANNOTATION_IS_MIGRATION,
     ANNOTATION_TRUTH_VALUE,
-    NotAPipelineFile,
     determine_task_bundle_upgrades_range,
     fetch_migration_file,
     IncorrectMigrationAttachment,
     LinkedMigrationsResolver,
-    resolve_pipeline,
     SimpleIterationResolver,
     TaskBundleMigration,
     TaskBundleUpgrade,
     TaskBundleUpgradesManager,
-    TEKTON_KIND_PIPELINE,
-    TEKTON_KIND_PIPELINE_RUN,
 )
 from pipeline_migration.quay import QuayTagInfo
 from pipeline_migration.registry import Container
-from pipeline_migration.utils import load_yaml, dump_yaml
 from tests.utils import generate_digest
 
 
@@ -172,133 +163,6 @@ class TestTaskBundleUpgrade:
         )
         assert upgrade.current_bundle == f"{APP_IMAGE_REPO}:0.1@{current_digest}"
         assert upgrade.new_bundle == f"{APP_IMAGE_REPO}:0.2@{new_digest}"
-
-
-class TestResolvePipeline:
-
-    def test_resolve_from_a_pipeline_definition(self, pipeline_yaml, tmp_path):
-        pipeline_file = tmp_path / "pl.yaml"
-        pipeline_file.write_text(pipeline_yaml)
-        with resolve_pipeline(pipeline_file) as f:
-            assert pipeline_yaml == Path(f).read_text()
-
-    def test_resolve_from_a_pipeline_run_definition(self, pipeline_run_yaml, tmp_path):
-        pipeline_file = tmp_path / "plr.yaml"
-        pipeline_file.write_text(pipeline_run_yaml)
-        with resolve_pipeline(pipeline_file) as f:
-            resolved_pipeline = load_yaml(f)
-            assert "spec" in resolved_pipeline
-            pipeline_run = load_yaml(pipeline_file)
-            assert resolved_pipeline["spec"] == pipeline_run["spec"]["pipelineSpec"]
-
-    def test_updates_to_pipeline_are_dumped(self, pipeline_and_run_yaml, tmp_path):
-        pipeline_file = tmp_path / "file.yaml"
-        pipeline_file.write_text(pipeline_and_run_yaml)
-
-        with resolve_pipeline(pipeline_file) as f:
-            pl = load_yaml(f)
-            pl["spec"]["tasks"].append({"name": "test"})
-            dump_yaml(f, pl)
-
-        doc = load_yaml(pipeline_file)
-        if doc["kind"] == TEKTON_KIND_PIPELINE:
-            tasks = doc["spec"]["tasks"]
-        elif doc["kind"] == TEKTON_KIND_PIPELINE_RUN:
-            tasks = doc["spec"]["pipelineSpec"]["tasks"]
-        else:
-            raise ValueError(f"Unexpected kind {doc['kind']}")
-
-        assert tasks[-1]["name"] == "test"
-
-    def test_formatting_ensure_quotes_are_preserved(self, pipeline_and_run_yaml, tmp_path):
-        pipeline_file = tmp_path / "file.yaml"
-        pipeline_file.write_text(pipeline_and_run_yaml)
-
-        original_yaml = pipeline_file.read_text().rstrip()
-
-        with resolve_pipeline(pipeline_file) as file_path:
-            # Make changes to ensure the resolve_pipeline writes content
-            # to the original pipeline file
-            with open(file_path, "r") as stream:
-                content = stream.read()
-            with open(file_path, "w+") as stream:
-                stream.write("---\n")
-                stream.write(content)
-
-        changed_yaml = pipeline_file.read_text().strip("-\n")
-        assert changed_yaml == original_yaml
-
-    @patch("pipeline_migration.actions.migrate.dump_yaml")
-    def test_do_not_save_if_pipeline_is_not_modified(
-        self, mock_dump_yaml, pipeline_and_run_yaml, tmp_path
-    ):
-        pipeline_file = tmp_path / "plr.yaml"
-        pipeline_file.write_text(pipeline_and_run_yaml)
-
-        with resolve_pipeline(pipeline_file):
-            pass  # Nothing is changed
-
-        doc = YAML().load(pipeline_and_run_yaml)
-        if doc["kind"] == TEKTON_KIND_PIPELINE:
-            assert mock_dump_yaml.call_count == 0
-        elif doc["kind"] == TEKTON_KIND_PIPELINE_RUN:
-            assert mock_dump_yaml.call_count == 1
-
-    def test_do_not_handle_pipelineref(self, tmp_path):
-        pipeline_file = tmp_path / "plr.yaml"
-        content = dedent(
-            """\
-            apiVersion: tekton.dev/v1
-            kind: PipelineRun
-            metadata:
-                name: plr
-            spec:
-                pipelineRef:
-                    name: pipeline
-            """
-        )
-        pipeline_file.write_text(content)
-        with pytest.raises(NotAPipelineFile, match="PipelineRun definition seems not embedded"):
-            with resolve_pipeline(pipeline_file):
-                pass
-
-    def test_given_file_is_not_yaml_file(self, tmp_path):
-        pipeline_file = tmp_path / "invalid.file"
-        pipeline_file.write_text("hello world")
-        with pytest.raises(NotAPipelineFile, match="not a YAML mapping"):
-            with resolve_pipeline(pipeline_file):
-                pass
-
-    def test_empty_pipeline_run(self, tmp_path):
-        pipeline_file = tmp_path / "plr.yaml"
-        content = dedent(
-            """\
-            apiVersion: tekton.dev/v1
-            kind: PipelineRun
-            metadata:
-                name: plr
-            spec:
-            """
-        )
-        pipeline_file.write_text(content)
-        with pytest.raises(NotAPipelineFile, match="neither .pipelineSpec nor .pipelineRef field"):
-            with resolve_pipeline(pipeline_file):
-                pass
-
-    def test_given_file_does_not_have_known_kind(self, tmp_path):
-        pipeline_file = tmp_path / "plr.yaml"
-        content = dedent(
-            """\
-            apiVersion: tekton.dev/v1
-            spec:
-            """
-        )
-        pipeline_file.write_text(content)
-        with pytest.raises(
-            NotAPipelineFile, match="does not have knownn kind Pipeline or PipelineRun"
-        ):
-            with resolve_pipeline(pipeline_file):
-                pass
 
 
 RENOVATE_UPGRADES: list[dict[str, Any]] = [

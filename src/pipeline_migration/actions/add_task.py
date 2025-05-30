@@ -3,7 +3,7 @@ import logging
 import re
 import subprocess
 from argparse import ArgumentTypeError
-from collections.abc import Generator, Iterable
+from collections.abc import Generator
 from pathlib import Path
 from typing import Any, Final
 
@@ -11,7 +11,7 @@ import requests
 from packaging.version import parse as parse_version
 from ruamel.yaml.scalarstring import DoubleQuotedScalarString
 
-from pipeline_migration.actions.migrate import NotAPipelineFile, resolve_pipeline
+from pipeline_migration.pipeline import search_pipeline_files
 from pipeline_migration.quay import get_active_tag
 from pipeline_migration.registry import REGISTRY, Container
 from pipeline_migration.types import FilePath
@@ -265,37 +265,6 @@ def git_add(file_path: FilePath) -> None:
         subprocess.run(cmd, cwd=fp.parent, capture_output=True, check=True)
     except subprocess.CalledProcessError as e:
         logger.warning("%s is not added to git index: %s", file_path, e.stderr)
-
-
-def search_pipeline_files(files_or_dirs: Iterable[str]) -> Generator[tuple[str, str]]:
-
-    def _iterate_files_or_dirs() -> Generator[Path]:
-        for item in files_or_dirs:
-            if not item:
-                continue
-            entry_path = Path(item).absolute()
-            if entry_path.is_symlink():
-                logger.warning(
-                    "Skip symlink %s. Please specify the destination file or directory instead.",
-                    item,
-                )
-            elif entry_path.is_dir():
-                for entry in entry_path.iterdir():
-                    if entry.is_symlink():
-                        continue
-                    if entry.is_file() and entry.name.endswith(".yaml"):
-                        yield entry
-            elif entry_path.is_file():
-                yield entry_path
-
-    for file_path in _iterate_files_or_dirs():
-        try:
-            with resolve_pipeline(file_path) as pipeline_file:
-                yield str(file_path), str(pipeline_file)
-        except NotAPipelineFile as e:
-            logger.warning("%s is not an expected pipeline file due to: %s", file_path.name, e)
-        except Exception as e:
-            logger.warning("%s seems not a YAML file due to: %s", file_path.name, e)
 
 
 class KonfluxBuildDefinitions:

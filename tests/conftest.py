@@ -129,7 +129,7 @@ def pipeline_yaml():
               resolver: bundles
               params:
               - name: name
-                value: clone
+                value: git-clone-oci-ta
               - name: bundle
                 value: bundle_ref
               - name: kind
@@ -207,7 +207,7 @@ def pipeline_run_yaml() -> str:
                 resolver: bundles
                 params:
                 - name: name
-                  value: clone
+                  value: git-clone-oci-ta
                 - name: bundle
                   value: bundle_ref
                 - name: kind

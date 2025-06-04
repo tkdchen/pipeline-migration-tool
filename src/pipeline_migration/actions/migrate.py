@@ -14,10 +14,11 @@ from typing import Final, Any
 from jsonschema.exceptions import ValidationError
 from jsonschema.validators import Draft202012Validator
 
-from pipeline_migration.registry import Container, Registry, ImageIndex
+from pipeline_migration.pipeline import PipelineFileOperation
 from pipeline_migration.quay import QuayTagInfo, list_active_repo_tags
-from pipeline_migration.utils import is_true
-from pipeline_migration.pipeline import resolve_pipeline
+from pipeline_migration.registry import Container, Registry, ImageIndex
+from pipeline_migration.types import FilePath
+from pipeline_migration.utils import is_true, file_checksum, load_yaml, dump_yaml, YAMLStyle
 
 ANNOTATION_HAS_MIGRATION: Final[str] = "dev.konflux-ci.task.has-migration"
 ANNOTATION_IS_MIGRATION: Final[str] = "dev.konflux-ci.task.is-migration"
@@ -144,6 +145,67 @@ def determine_task_bundle_upgrades_range(
     )
 
 
+class MigrationFileOperation(PipelineFileOperation):
+
+    def __init__(self, task_bundle_upgrades: list[TaskBundleUpgrade]):
+        self._task_bundle_upgrades = task_bundle_upgrades
+
+    def _apply_migration(self, file_path: FilePath) -> None:
+        fd, migration_file = tempfile.mkstemp(suffix="-migration-file")
+        prev_size = 0
+        try:
+            for task_bundle_upgrade in self._task_bundle_upgrades:
+                for migration in task_bundle_upgrade.migrations:
+                    logger.info(
+                        "Apply migration of task bundle %s in package file %s",
+                        migration.task_bundle,
+                        file_path,
+                    )
+
+                    os.lseek(fd, 0, 0)
+                    content = migration.migration_script.encode("utf-8")
+                    if len(content) < prev_size:
+                        os.truncate(fd, len(content))
+                    prev_size = os.write(fd, content)
+
+                    cmd = ["bash", migration_file, file_path]
+                    logger.debug("Run: %r", cmd)
+                    proc = sp.run(cmd, stderr=sp.STDOUT, stdout=sp.PIPE)
+                    logger.debug("%r", proc.stdout)
+                    proc.check_returncode()
+        finally:
+            os.close(fd)
+            os.unlink(migration_file)
+
+    def handle_pipeline_file(self, file_path: FilePath, loaded_doc: Any, style: YAMLStyle) -> None:
+        yaml_style = style
+        origin_checksum = file_checksum(file_path)
+        self._apply_migration(file_path)
+        if file_checksum(file_path) != origin_checksum:
+            pl_yaml = load_yaml(file_path, style=yaml_style)
+            dump_yaml(file_path, pl_yaml, style=yaml_style)
+
+    def handle_pipeline_run_file(
+        self, file_path: FilePath, loaded_doc: Any, style: YAMLStyle
+    ) -> None:
+        yaml_style = style
+        original_pipeline_doc = loaded_doc
+
+        fd, temp_pipeline_file = tempfile.mkstemp(suffix="-pipeline")
+        os.close(fd)
+
+        pipeline_spec = {"spec": original_pipeline_doc["spec"]["pipelineSpec"]}
+        dump_yaml(temp_pipeline_file, pipeline_spec, style=yaml_style)
+        origin_checksum = file_checksum(temp_pipeline_file)
+
+        self._apply_migration(temp_pipeline_file)
+
+        if file_checksum(temp_pipeline_file) != origin_checksum:
+            modified_pipeline = load_yaml(temp_pipeline_file, style=yaml_style)
+            original_pipeline_doc["spec"]["pipelineSpec"] = modified_pipeline["spec"]
+            dump_yaml(file_path, original_pipeline_doc, style=yaml_style)
+
+
 class TaskBundleUpgradesManager:
 
     def __init__(self, upgrades: list[dict[str, Any]], resolver_class: type["Resolver"]) -> None:
@@ -196,32 +258,8 @@ class TaskBundleUpgradesManager:
         for package_file in self.package_files:
             if not os.path.exists(package_file.file_path):
                 raise ValueError(f"Pipeline file does not exist: {package_file.file_path}")
-            with resolve_pipeline(package_file.file_path) as pipeline_file:
-                fd, migration_file = tempfile.mkstemp(suffix="-migration-file")
-                prev_size = 0
-                try:
-                    for task_bundle_upgrade in package_file.task_bundle_upgrades:
-                        for migration in task_bundle_upgrade.migrations:
-                            logger.info(
-                                "Apply migration of task bundle %s in package file %s",
-                                migration.task_bundle,
-                                package_file.file_path,
-                            )
-
-                            os.lseek(fd, 0, 0)
-                            content = migration.migration_script.encode("utf-8")
-                            if len(content) < prev_size:
-                                os.truncate(fd, len(content))
-                            prev_size = os.write(fd, content)
-
-                            cmd = ["bash", migration_file, pipeline_file]
-                            logger.debug("Run: %r", cmd)
-                            proc = sp.run(cmd, stderr=sp.STDOUT, stdout=sp.PIPE)
-                            logger.debug("%r", proc.stdout)
-                            proc.check_returncode()
-                finally:
-                    os.close(fd)
-                    os.unlink(migration_file)
+            op = MigrationFileOperation(package_file.task_bundle_upgrades)
+            op.handle(package_file.file_path)
 
 
 class IncorrectMigrationAttachment(Exception):

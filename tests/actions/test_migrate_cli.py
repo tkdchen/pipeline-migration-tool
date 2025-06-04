@@ -221,8 +221,8 @@ class TestMigrateSingleTaskBundleUpgrade:
                 json={"tags": tags, "page": 1, "has_additional": False},
             )
 
-    def _mock_pipeline_file(self, tmp_path: Path, content: str) -> Path:
-        tekton_dir = tmp_path / ".tekton"
+    def _mock_pipeline_file(self, repo_path: Path, content: str) -> Path:
+        tekton_dir = repo_path / ".tekton"
         tekton_dir.mkdir()
         pipeline_file = tekton_dir / "component-pipeline.yaml"
         pipeline_file.write_text(content)
@@ -256,7 +256,7 @@ class TestMigrateSingleTaskBundleUpgrade:
                 "packageFile": str(pipeline_file.relative_to(tmp_path)),
                 "parentDir": pipeline_file.parent.name,
             },
-            # Following two should be excluded and do not affect the migration.
+            # Following two should be excluded due to the depTypes and do not affect the migration.
             {
                 "depName": APP_IMAGE_REPO,
                 "currentValue": "0.2",
@@ -328,6 +328,38 @@ class TestMigrateSingleTaskBundleUpgrade:
             assert origin_style.indentation.levels == cur_style.indentation.levels
         else:
             assert cur_style.indentation.levels == [0]
+
+    @responses.activate
+    def test_non_existing_package_file(self, monkeypatch, tmp_path, caplog):
+        """Migrate should stop if package file included in an upgrade does not exist"""
+
+        some_dir = tmp_path / "some_dir"
+        some_dir.mkdir()
+        monkeypatch.chdir(some_dir)
+
+        upgrades = [
+            {
+                "depName": TASK_BUNDLE_CLONE,
+                "currentValue": "0.1",
+                "currentDigest": "sha256:492fb9ae4e7e",
+                "newValue": "0.1",
+                "newDigest": "sha256:c4bb69a3a08f",
+                "depTypes": ["tekton-bundle"],
+                "packageFile": ".tekton/pull.yaml",
+                "parentDir": ".tekton",
+            },
+        ]
+
+        monkeypatch.setattr("pipeline_migration.actions.migrate.Registry", MockRegistry)
+        self._mock_quay_list_tags()
+
+        cli_cmd = ["pmt", "migrate", "-u", json.dumps(upgrades)]
+        monkeypatch.setattr("sys.argv", cli_cmd)
+
+        assert entry_point() == 1
+        package_file = upgrades[0]["packageFile"]
+        log_msg = f"Pipeline file does not exist: {package_file}"
+        assert log_msg in caplog.text
 
 
 def test_entry_point_should_catch_error(monkeypatch, caplog):

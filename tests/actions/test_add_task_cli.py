@@ -407,10 +407,10 @@ def test_skip_adding_task_if_exists(
     monkeypatch,
     caplog,
 ) -> None:
-    # component-b repo already has a build pipeline with build task.
+    # Task git-clone-oci-ta is included in pipelines of both component a and b repository.
 
     version: Final = "0.1"
-    task_name: Final = "buildah-oci-ta"
+    task_name: Final = "git-clone-oci-ta"
     image_repo: Final = f"{KONFLUX_IMAGE_ORG}/task-{task_name}"
     bundle_ref: Final = f"quay.io/{image_repo}:{version}@{bundle_digest}"
 
@@ -444,7 +444,10 @@ def test_skip_adding_task_if_exists(
         entry_point()
         assert expected_log in caplog.text
 
-    assert git_index == [], ""
+    assert git_index == [], (
+        "Neither Pipeline or PipelineRun from component_a and component_b "
+        "repositories should be handled."
+    )
 
 
 @responses.activate

@@ -493,6 +493,7 @@ class TestMigrationFileOperationHandlePipelineFile:
 
         expected_dump_yaml_calls = 0  # for Pipeline
         if "kind: PipelineRun" in pipeline_and_run_yaml:
+            # At least one dump_yaml call to write pipeline definition into a temp file.
             expected_dump_yaml_calls = 1
 
         def _mkstemp(*args, **kwargs):

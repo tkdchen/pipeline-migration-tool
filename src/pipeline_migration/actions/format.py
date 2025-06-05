@@ -11,14 +11,13 @@ logger = logging.getLogger("formatter")
 
 def register_cli(subparser) -> None:
     format_parser: argparse.ArgumentParser = subparser.add_parser(
-        "format", help="Format given build pipelines."
+        "format", help="Format Konflux Pipeline and PipelineRun YAML files."
     )
     format_parser.add_argument(
         "file_or_dir",
         nargs="*",
-        help="Specify locations from where finding out pipelines to add task. "
-        "A pipeline can be included in a PipelineRun or a single Pipeline definition. "
-        "%(prog)s searches pipelines from given locations by rules, if files are specified, "
+        help="Specify locations from where finding out Pipeline and PipelineRun YAML files. "
+        "%(prog)s searches files from given locations by rules, if files are specified, "
         "search just pipelines from them. If directories are specified, search YAML files from the "
         "first level of each one. If neither is specified, the location defaults to ./.tekton/ "
         "directory.",

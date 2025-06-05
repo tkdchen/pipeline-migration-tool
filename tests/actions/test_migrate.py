@@ -463,6 +463,8 @@ class TestMigrationFileOperationHandlePipelineFile:
             style = YAMLStyle.detect(pipeline_file)
             doc = load_yaml(pipeline_file, style)
             doc["spec"]["tasks"].append({"name": "test"})
+            # simulate yq to indent block sequences with 2 spaces
+            style.indentation.indent(2)
             dump_yaml(pipeline_file, doc, style)
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 

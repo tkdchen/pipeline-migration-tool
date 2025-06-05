@@ -182,7 +182,10 @@ class MigrationFileOperation(PipelineFileOperation):
         origin_checksum = file_checksum(file_path)
         self._apply_migration(file_path)
         if file_checksum(file_path) != origin_checksum:
-            # Ensure the original YAML formatting is preserved as much as possible
+            # By design, migration scripts invoke yq to apply changes to pipeline YAML and
+            # the result YAML includes indented block sequences.
+            # This load-dump round-trip ensures the original YAML formatting is preserved
+            # as much as possible.
             pl_yaml = load_yaml(file_path, style=yaml_style)
             dump_yaml(file_path, pl_yaml, style=yaml_style)
 

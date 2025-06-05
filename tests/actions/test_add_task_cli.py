@@ -519,4 +519,6 @@ def test_preserve_yaml_formatting(component_a_repo, component_b_repo, monkeypatc
     )
     for file_path in pipeline_files:
         match = re.search(r'name: revision\n +default: "main"', file_path.read_text())
-        assert match, "YAML style is not set properly to preserve formatting."
+        assert (
+            match
+        ), "Expected text should be preserved. YAMLstyle is not set properly to preserve format."

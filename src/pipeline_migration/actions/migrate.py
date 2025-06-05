@@ -182,6 +182,7 @@ class MigrationFileOperation(PipelineFileOperation):
         origin_checksum = file_checksum(file_path)
         self._apply_migration(file_path)
         if file_checksum(file_path) != origin_checksum:
+            # Ensure the original YAML formatting is preserved as much as possible
             pl_yaml = load_yaml(file_path, style=yaml_style)
             dump_yaml(file_path, pl_yaml, style=yaml_style)
 

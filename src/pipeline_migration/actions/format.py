@@ -44,5 +44,6 @@ class FormatterFileOperation(PipelineFileOperation):
         self._format(file_path, loaded_doc, style)
 
     def _format(self, file_path: FilePath, loaded_doc: Any, style: YAMLStyle) -> None:
-        style.indentation = BlockSequenceIndentation(indentations={0: 1})
+        style.indentation = BlockSequenceIndentation()
+        style.indentation.indent(0)
         dump_yaml(file_path, loaded_doc, style)

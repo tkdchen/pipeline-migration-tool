@@ -34,6 +34,10 @@ class BlockSequenceIndentation:
     def levels(self) -> list[int]:
         return list(self.indentations.keys())
 
+    def indent(self, level: int) -> None:
+        """Set indentation for block sequence consistently through whole YAML doc"""
+        self.indentations = {level: 1}
+
 
 @dataclass
 class _NodePath:

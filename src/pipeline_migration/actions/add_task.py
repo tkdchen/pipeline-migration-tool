@@ -3,19 +3,20 @@ import logging
 import re
 import subprocess
 from argparse import ArgumentTypeError
-from collections.abc import Generator, Iterable
+from collections.abc import Generator
 from pathlib import Path
 from typing import Any, Final
 
 import requests
 from packaging.version import parse as parse_version
+from ruamel.yaml.comments import CommentedSeq
 from ruamel.yaml.scalarstring import DoubleQuotedScalarString
 
-from pipeline_migration.actions.migrate import NotAPipelineFile, resolve_pipeline
 from pipeline_migration.quay import get_active_tag
 from pipeline_migration.registry import REGISTRY, Container
 from pipeline_migration.types import FilePath
-from pipeline_migration.utils import load_yaml, dump_yaml, YAMLStyle
+from pipeline_migration.utils import dump_yaml, YAMLStyle
+from pipeline_migration.pipeline import PipelineFileOperation, iterate_files_or_dirs
 
 logger = logging.getLogger("add_task")
 
@@ -157,6 +158,83 @@ def register_cli(subparser) -> None:
     add_task_parser.set_defaults(action=action)
 
 
+class AddTaskOperation(PipelineFileOperation):
+
+    def __init__(
+        self,
+        task_config: dict,
+        pipeline_task_name: str,
+        actual_task_name: str,
+        git_add: bool = False,
+    ) -> None:
+        self.task_config = task_config
+        self.pipeline_task_name = pipeline_task_name
+        self.actual_task_name = actual_task_name
+        self.git_add = git_add
+
+    def handle_pipeline_file(self, file_path: FilePath, loaded_doc: Any, style: YAMLStyle) -> None:
+        tasks = loaded_doc["spec"]["tasks"]
+        if self._add(tasks, str(file_path)):
+            dump_yaml(file_path, loaded_doc, style)
+            if self.git_add:
+                git_add(file_path)
+                logger.info("%s is added to git index.", file_path)
+
+    def handle_pipeline_run_file(
+        self, file_path: FilePath, loaded_doc: Any, style: YAMLStyle
+    ) -> None:
+        tasks = loaded_doc["spec"]["pipelineSpec"]["tasks"]
+        if self._add(tasks, str(file_path)):
+            dump_yaml(file_path, loaded_doc, style)
+            if self.git_add:
+                git_add(file_path)
+                logger.info("%s is added to git index.", file_path)
+
+    def _add(self, tasks: CommentedSeq, pipeline_file: str) -> bool:
+        existing_pipeline_task_names = set([])
+        existing_actual_task_names = set([])
+
+        for name1, name2 in KonfluxBuildDefinitions.extract_task_names(tasks):
+            existing_pipeline_task_names.add(name1)
+            existing_actual_task_names.add(name2)
+
+        if (depended_tasks := self.task_config.get("runAfter")) is not None:
+            for name in depended_tasks:
+                if name not in existing_pipeline_task_names:
+                    raise ValueError(
+                        f"Task {name} does not exist in the pipeline definition {pipeline_file}."
+                    )
+
+        if self.pipeline_task_name in existing_pipeline_task_names:
+            logger.info(
+                "Task %s is included in pipeline %s already.",
+                self.pipeline_task_name,
+                pipeline_file,
+            )
+            return False
+
+        if self.actual_task_name in existing_actual_task_names:
+            logger.info(
+                "Task %s is being referenced in pipeline %s already.",
+                self.actual_task_name,
+                pipeline_file,
+            )
+            return False
+
+        if (
+            self.pipeline_task_name in existing_actual_task_names
+            or self.actual_task_name in existing_pipeline_task_names
+        ):
+            logger.warning(
+                "The pipeline task name and actual task name seem swapped. Skip adding task."
+            )
+            return False
+
+        tasks.append(self.task_config)
+        logger.info("Task %s is added to pipeline %s", self.actual_task_name, pipeline_file)
+        return True
+
+
 def action(args) -> None:
     actual_task_name: Final = args.task
     pipeline_task_name: Final = args.pipeline_task_name or args.task.removesuffix("-oci-ta")
@@ -196,55 +274,9 @@ def action(args) -> None:
     if not search_places and relative_tekton_dir.exists():
         search_places = [str(relative_tekton_dir.absolute())]
 
-    for original_abs_path, pipeline_file in search_pipeline_files(search_places):
-        style = YAMLStyle.detect(pipeline_file)
-        doc = load_yaml(pipeline_file, style)
-        tasks = doc["spec"]["tasks"]
-
-        existing_pipeline_task_names = set([])
-        existing_actual_task_names = set([])
-
-        for name1, name2 in KonfluxBuildDefinitions.extract_task_names(tasks):
-            existing_pipeline_task_names.add(name1)
-            existing_actual_task_names.add(name2)
-
-        if (depended_tasks := task_config.get("runAfter")) is not None:
-            for name in depended_tasks:
-                if name not in existing_pipeline_task_names:
-                    raise ValueError(
-                        f"Task {name} does not exist in the pipeline definition {pipeline_file}."
-                    )
-
-        if pipeline_task_name in existing_pipeline_task_names:
-            logger.info(
-                "Task %s is included in pipeline %s already.", pipeline_task_name, pipeline_file
-            )
-            continue
-
-        if actual_task_name in existing_actual_task_names:
-            logger.info(
-                "Task %s is being referenced in pipeline %s already.",
-                actual_task_name,
-                pipeline_file,
-            )
-            continue
-
-        if (
-            pipeline_task_name in existing_actual_task_names
-            or actual_task_name in existing_pipeline_task_names
-        ):
-            logger.warning(
-                "The pipeline task name and actual task name seem swapped. Skip adding task."
-            )
-            continue
-
-        tasks.append(task_config)
-        dump_yaml(pipeline_file, doc, style)
-        logger.info("Task %s is added to pipeline %s", actual_task_name, original_abs_path)
-
-        if args.git_add:
-            git_add(original_abs_path)
-            logger.info("%s is added to git index.", original_abs_path)
+    op = AddTaskOperation(task_config, pipeline_task_name, actual_task_name, git_add=args.git_add)
+    for file_path in iterate_files_or_dirs(search_places):
+        op.handle(str(file_path))
 
 
 def git_add(file_path: FilePath) -> None:
@@ -265,37 +297,6 @@ def git_add(file_path: FilePath) -> None:
         subprocess.run(cmd, cwd=fp.parent, capture_output=True, check=True)
     except subprocess.CalledProcessError as e:
         logger.warning("%s is not added to git index: %s", file_path, e.stderr)
-
-
-def search_pipeline_files(files_or_dirs: Iterable[str]) -> Generator[tuple[str, str]]:
-
-    def _iterate_files_or_dirs() -> Generator[Path]:
-        for item in files_or_dirs:
-            if not item:
-                continue
-            entry_path = Path(item).absolute()
-            if entry_path.is_symlink():
-                logger.warning(
-                    "Skip symlink %s. Please specify the destination file or directory instead.",
-                    item,
-                )
-            elif entry_path.is_dir():
-                for entry in entry_path.iterdir():
-                    if entry.is_symlink():
-                        continue
-                    if entry.is_file() and entry.name.endswith(".yaml"):
-                        yield entry
-            elif entry_path.is_file():
-                yield entry_path
-
-    for file_path in _iterate_files_or_dirs():
-        try:
-            with resolve_pipeline(file_path) as pipeline_file:
-                yield str(file_path), str(pipeline_file)
-        except NotAPipelineFile as e:
-            logger.warning("%s is not an expected pipeline file due to: %s", file_path.name, e)
-        except Exception as e:
-            logger.warning("%s seems not a YAML file due to: %s", file_path.name, e)
 
 
 class KonfluxBuildDefinitions:

@@ -1,4 +1,3 @@
-import socket
 import subprocess
 from typing import Final, Type
 
@@ -16,7 +15,6 @@ from pipeline_migration.actions.add_task import konflux_task_bundle_reference
 from pipeline_migration.actions.add_task import KonfluxBuildDefinitions
 from pipeline_migration.actions.add_task import KonfluxTaskFileNotExist
 from pipeline_migration.actions.add_task import KonfluxTaskNotExist
-from pipeline_migration.actions.add_task import search_pipeline_files
 from tests.utils import generate_digest
 
 
@@ -131,82 +129,6 @@ class TestGitAdd:
         git_add(file_to_add)
 
         assert f"{str(file_to_add)} is not added to git index: git failure" in caplog.text
-
-
-class TestSearchPipelineFiles:
-
-    def setup_method(self, method):
-        self.sock = None
-
-    def teardown_method(self, method):
-        if self.sock:
-            self.sock.close()
-
-    @pytest.mark.parametrize("data", [[], [""]])
-    def test_empty_input_files_or_dirs(self, data):
-        assert list(search_pipeline_files(data)) == []
-
-    def _create_noisy_files(self, component_a_repo, component_b_repo):
-        text_file = component_b_repo.tekton_dir / "test.txt"
-        text_file.write_text("hello world")
-
-        invalid_yaml_file = component_b_repo.tekton_dir / "invalid.yaml"
-        invalid_yaml_file.write_bytes(b"\x00")
-
-        common_yaml_file = component_a_repo.tekton_dir / "common.yaml"
-        common_yaml_file.write_text("book: Python programming")
-
-        yaml_files = component_b_repo.tekton_dir.glob("*.yaml")
-        symlink_to_pr_yaml = component_b_repo.tekton_dir / "link-to.yaml"
-        symlink_to_pr_yaml.symlink_to(next(yaml_files))
-
-        # Create a special socket file for satisfying the code path coverage
-        sock_file = component_b_repo.tekton_dir / "app.sock"
-        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self.sock.bind(str(sock_file))
-
-    def test_pipeline_files_from_given_files(
-        self, component_a_repo, component_b_repo, caplog, tmp_path, monkeypatch
-    ):
-        self._create_noisy_files(component_a_repo, component_b_repo)
-
-        files = map(
-            str,
-            [
-                *[p.name for p in component_a_repo.tekton_dir.iterdir()],
-                *component_b_repo.tekton_dir.iterdir(),
-            ],
-        )
-
-        # for testing converting relative path to absolute path
-        monkeypatch.chdir(component_a_repo.tekton_dir)
-
-        found = list(search_pipeline_files(files))
-        assert len(found) == 3
-
-        expected = [
-            str(component_a_repo.tekton_dir / "pr.yaml"),
-            str(component_a_repo.tekton_dir / "push.yaml"),
-            str(component_b_repo.tekton_dir / "build-pipeline.yaml"),
-        ]
-        assert sorted([item[0] for item in found]) == sorted(expected)
-
-    def test_search_pipeline_files_from_directory(
-        self, component_a_repo, component_b_repo, tmp_path, caplog
-    ):
-        """Ensure the search without recursive walk through directories"""
-
-        self._create_noisy_files(component_a_repo, component_b_repo)
-
-        sub_dir = component_b_repo.tekton_dir / "sub_dir"
-        sub_dir.mkdir()
-        (sub_dir / "another.file").touch()
-
-        found = list(search_pipeline_files([str(component_b_repo.tekton_dir)]))
-
-        assert len(found) == 1
-        original_pipeline_file = found[0][0]
-        assert original_pipeline_file == str(component_b_repo.tekton_dir / "build-pipeline.yaml")
 
 
 class TestDetermineTaskLatestVersion:

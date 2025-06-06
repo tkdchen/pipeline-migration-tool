@@ -1,15 +1,19 @@
+import itertools
 import logging
+import re
 from pathlib import Path
 from typing import Any, Final
 
 import pytest
 import responses
 from responses.matchers import query_param_matcher
+from ruamel.yaml.comments import CommentedSeq
 
 from pipeline_migration.actions.add_task import KonfluxBuildDefinitions
-from pipeline_migration.actions.migrate import resolve_pipeline
 from pipeline_migration.cli import entry_point
-from pipeline_migration.utils import load_yaml
+from pipeline_migration.pipeline import PipelineFileOperation
+from pipeline_migration.types import FilePath
+from pipeline_migration.utils import YAMLStyle
 from tests.utils import generate_digest
 
 KONFLUX_IMAGE_ORG: Final = KonfluxBuildDefinitions.KONFLUX_IMAGE_ORG
@@ -29,21 +33,35 @@ TEST_BUNDLE_DIGEST: Final = generate_digest()
 TEST_BUNDLE: Final = f"quay.io/{KONFLUX_IMAGE_ORG}/task-{TASK_TEST}:0.1@{TEST_BUNDLE_DIGEST}"
 
 
-def check_updated_pipeline(
-    file_path: Path,
-    task_name: str,
-    bundle_ref: str,
-    pipeline_task_name: str = "",
-    skip_checks: bool = False,
-    run_after: list[str] | None = None,
-    params: list[dict[str, str]] | None = None,
-) -> None:
-    with resolve_pipeline(file_path) as pipeline_file:
-        doc = load_yaml(pipeline_file)
-        expected_pipeline_task_name = pipeline_task_name or task_name
-        tasks = [
-            item for item in doc["spec"]["tasks"] if item["name"] == expected_pipeline_task_name
-        ]
+class VerifyUpdatedPipeline(PipelineFileOperation):
+
+    def __init__(
+        self,
+        task_name: str,
+        bundle_ref: str,
+        pipeline_task_name: str = "",
+        skip_checks: bool = False,
+        run_after: list[str] | None = None,
+        params: list[dict[str, str]] | None = None,
+    ):
+        self.task_name = task_name
+        self.bundle_ref = bundle_ref
+        self.pipeline_task_name = pipeline_task_name
+        self.skip_checks = skip_checks
+        self.run_after = run_after
+        self.params = params
+
+    def handle_pipeline_file(self, file_path: FilePath, loaded_doc: Any, style: YAMLStyle) -> None:
+        self.verify(loaded_doc["spec"]["tasks"])
+
+    def handle_pipeline_run_file(
+        self, file_path: FilePath, loaded_doc: Any, style: YAMLStyle
+    ) -> None:
+        self.verify(loaded_doc["spec"]["pipelineSpec"]["tasks"])
+
+    def verify(self, tasks: CommentedSeq):
+        expected_pipeline_task_name = self.pipeline_task_name or self.task_name
+        tasks = [item for item in tasks if item["name"] == expected_pipeline_task_name]
         assert len(tasks) == 1
         expected_task_config: dict[str, Any] = {
             "name": expected_pipeline_task_name,
@@ -51,20 +69,23 @@ def check_updated_pipeline(
                 "resolver": "bundles",
                 "params": [
                     {"name": "kind", "value": "task"},
-                    {"name": "name", "value": task_name},
-                    {"name": "bundle", "value": bundle_ref},
+                    {"name": "name", "value": self.task_name},
+                    {"name": "bundle", "value": self.bundle_ref},
                 ],
             },
         }
-        if skip_checks:
+        if self.skip_checks:
             expected_task_config["when"] = [
                 {"input": "$(params.skip-checks)", "operator": "in", "values": ["false"]}
             ]
-        if run_after:
-            expected_task_config["runAfter"] = run_after[:]
-        if params:
-            expected_task_config["params"] = params[:]
+        if self.run_after:
+            expected_task_config["runAfter"] = self.run_after[:]
+        if self.params:
+            expected_task_config["params"] = self.params[:]
         assert tasks[0] == expected_task_config
+
+    def check(self, file_path: str):
+        return super().handle(file_path)
 
 
 def mock_get_digest_for_specific_tag(image_repo: str, version: str, expected_digest: str) -> None:
@@ -127,7 +148,7 @@ def test_use_bundle_ref(bundle_ref, expected_bundle_ref, component_a_repo, monke
 
     entry_point()
 
-    check_updated_pipeline(pipeline_file, TASK_NAME, expected_bundle_ref)
+    VerifyUpdatedPipeline(TASK_NAME, expected_bundle_ref).check(str(pipeline_file))
 
 
 FILES_DIRS_COMBINATIONS = [
@@ -176,12 +197,13 @@ def test_work_with_files_or_dirs(files_dirs_combinations, component_b_repo, monk
 
     entry_point()
 
+    verifier = VerifyUpdatedPipeline(TASK_NAME, BUNDLE_REF)
     for item in check_targets:
         if item.is_dir():
             for yaml_file in item.glob("*.yaml"):
-                check_updated_pipeline(yaml_file, TASK_NAME, BUNDLE_REF)
+                verifier.check(str(yaml_file))
         else:
-            check_updated_pipeline(item, TASK_NAME, BUNDLE_REF)
+            verifier.check(str(item))
 
 
 @responses.activate
@@ -217,8 +239,9 @@ def test_set_execution_order(request, depended_tasks, component_b_repo, caplog, 
     else:
         entry_point()
 
+        verifier = VerifyUpdatedPipeline(TASK_NAME, BUNDLE_REF, run_after=depended_tasks)
         for yaml_file in component_b_repo.tekton_dir.glob("*.yaml"):
-            check_updated_pipeline(yaml_file, TASK_NAME, BUNDLE_REF, run_after=depended_tasks)
+            verifier.check(str(yaml_file))
 
 
 @responses.activate
@@ -265,8 +288,9 @@ def test_set_params(request, params, expected_params, component_b_repo, capsys, 
     else:
         entry_point()
 
+        verifier = VerifyUpdatedPipeline(TASK_NAME, BUNDLE_REF, params=expected_params)
         for yaml_file in component_b_repo.tekton_dir.glob("*.yaml"):
-            check_updated_pipeline(yaml_file, TASK_NAME, BUNDLE_REF, params=expected_params)
+            verifier.check(str(yaml_file))
 
 
 @responses.activate
@@ -288,22 +312,32 @@ def test_set_skip_checks(skip_checks, component_b_repo, monkeypatch):
     monkeypatch.setattr("sys.argv", cmd)
     entry_point()
 
+    verifier = VerifyUpdatedPipeline(TASK_NAME, BUNDLE_REF, skip_checks=skip_checks)
     for yaml_file in component_b_repo.tekton_dir.glob("*.yaml"):
-        check_updated_pipeline(yaml_file, TASK_NAME, BUNDLE_REF, skip_checks=skip_checks)
+        verifier.check(str(yaml_file))
 
 
 @responses.activate
-def test_add_task_with_params_and_run_after_clone(component_b_repo, monkeypatch):
+def test_add_task_with_params_and_run_after_clone(component_a_repo, component_b_repo, monkeypatch):
     mock_http_requests_for_handling_bundle_ref(BUNDLE_REF)
 
+    pipeline_files = list(
+        itertools.chain(
+            component_a_repo.tekton_dir.glob("*.yaml"),
+            component_b_repo.tekton_dir.glob("*.yaml"),
+        )
+    )
+
     git_index = []
-    expected_yaml_files = [filename.name for filename in component_b_repo.tekton_dir.glob("*.yaml")]
+    expected_yaml_files = [filename.name for filename in pipeline_files]
 
     def _git_add(*args, **kwargs):
-        assert str(kwargs.get("cwd")) == str(component_b_repo.tekton_dir)
+        assert str(kwargs.get("cwd")) in [
+            str(component_a_repo.tekton_dir),
+            str(component_b_repo.tekton_dir),
+        ]
         run_cmd = args[-1]
         filename = run_cmd[-1]
-        assert filename in expected_yaml_files
         git_index.append(filename)
 
     monkeypatch.setattr("subprocess.run", _git_add)
@@ -314,11 +348,12 @@ def test_add_task_with_params_and_run_after_clone(component_b_repo, monkeypatch)
         "--bundle-ref",
         BUNDLE_REF,
         "--run-after",
-        "build",
+        "clone",
         "--param",
         "image_url=$(build.results.image_url)",
         "--git-add",
         TASK_NAME,
+        str(component_a_repo.tekton_dir),
         str(component_b_repo.tekton_dir),
     ]
 
@@ -326,10 +361,11 @@ def test_add_task_with_params_and_run_after_clone(component_b_repo, monkeypatch)
     entry_point()
 
     expected_params = [{"name": "image_url", "value": "$(build.results.image_url)"}]
-    for yaml_file in component_b_repo.tekton_dir.glob("*.yaml"):
-        check_updated_pipeline(
-            yaml_file, TASK_NAME, BUNDLE_REF, params=expected_params, run_after=["build"]
-        )
+    verifier = VerifyUpdatedPipeline(
+        TASK_NAME, BUNDLE_REF, params=expected_params, run_after=["clone"]
+    )
+    for yaml_file in pipeline_files:
+        verifier.check(str(yaml_file))
 
     assert len(git_index) == len(expected_yaml_files)
 
@@ -339,22 +375,22 @@ def test_add_task_with_params_and_run_after_clone(component_b_repo, monkeypatch)
     "pipeline_task_name,actual_task_name,bundle_digest,expected_log",
     [
         pytest.param(
-            "build",
-            "buildah-oci-ta",
+            "clone",
+            "git-clone-oci-ta",
             generate_digest(),
-            "Task build is included in pipeline",
+            "Task clone is included in pipeline",
             id="pipeline-task-name-exists",
         ),
         pytest.param(
-            "buildah-oci-ta",
-            "buildah-oci-ta",
+            "git-clone-oci-ta",
+            "git-clone-oci-ta",
             generate_digest(),
-            "Task buildah-oci-ta is being referenced in pipeline ",
+            "Task git-clone-oci-ta is being referenced in pipeline ",
             id="actual-task-name-exists",
         ),
         pytest.param(
-            "buildah-oci-ta",
-            "build",
+            "git-clone-oci-ta",
+            "clone",
             generate_digest(),
             "The pipeline task name and actual task name seem swapped",
             id="pipeline-and-actual-task-names-are-swapped",
@@ -371,16 +407,16 @@ def test_skip_adding_task_if_exists(
     monkeypatch,
     caplog,
 ) -> None:
-    # component-b repo already has a build pipeline with build task.
+    # Task git-clone-oci-ta is included in pipelines of both component a and b repository.
 
     version: Final = "0.1"
-    task_name: Final = "buildah-oci-ta"
+    task_name: Final = "git-clone-oci-ta"
     image_repo: Final = f"{KONFLUX_IMAGE_ORG}/task-{task_name}"
     bundle_ref: Final = f"quay.io/{image_repo}:{version}@{bundle_digest}"
 
     mock_get_digest_for_specific_tag(image_repo, version, bundle_digest)
 
-    git_index = []
+    git_index: list[str] = []
 
     def _git_add(*args, **kwargs):
         run_cmd = args[-1]
@@ -408,12 +444,10 @@ def test_skip_adding_task_if_exists(
         entry_point()
         assert expected_log in caplog.text
 
-    expected_yaml_files = [
-        str(filename.name) for filename in component_a_repo.tekton_dir.glob("*.yaml")
-    ]
-    assert (
-        git_index == expected_yaml_files
-    ), "only PipelineRuns should be updated from component-b repo"
+    assert git_index == [], (
+        "Neither Pipeline or PipelineRun from component_a and component_b "
+        "repositories should be handled."
+    )
 
 
 @responses.activate
@@ -457,10 +491,37 @@ def test_pipeline_and_actual_task_name_combinations(
     monkeypatch.setattr("sys.argv", cmd)
     entry_point()
 
+    verifier = VerifyUpdatedPipeline(
+        expected_actual_task_name, BUNDLE_REF, pipeline_task_name=expected_pipeline_task_name
+    )
     for yaml_file in component_b_repo.tekton_dir.glob("*.yaml"):
-        check_updated_pipeline(
-            yaml_file,
-            expected_actual_task_name,
-            BUNDLE_REF,
-            pipeline_task_name=expected_pipeline_task_name,
-        )
+        verifier.check(str(yaml_file))
+
+
+@responses.activate
+def test_preserve_yaml_formatting(component_a_repo, component_b_repo, monkeypatch):
+    # component a and b repos have Pipeline and PipelineRun definitions individually
+    mock_http_requests_for_handling_bundle_ref(BUNDLE_REF)
+
+    cmd = [
+        "pmt",
+        "add-task",
+        "--bundle-ref",
+        BUNDLE_REF,
+        TASK_NAME,
+        str(component_a_repo.tekton_dir),
+        str(component_b_repo.tekton_dir),
+    ]
+
+    monkeypatch.setattr("sys.argv", cmd)
+    entry_point()
+
+    pipeline_files = itertools.chain(
+        component_a_repo.tekton_dir.glob("*.yaml"),
+        component_b_repo.tekton_dir.glob("*.yaml"),
+    )
+    for file_path in pipeline_files:
+        match = re.search(r'name: revision\n +default: "main"', file_path.read_text())
+        assert (
+            match
+        ), "Expected text should be preserved. YAMLstyle is not set properly to preserve format."

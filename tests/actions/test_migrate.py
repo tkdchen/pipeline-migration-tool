@@ -4,34 +4,31 @@ import logging
 import subprocess
 from copy import deepcopy
 from pathlib import Path
-from textwrap import dedent
 from typing import Any, Final
 from unittest.mock import patch
 
+from pipeline_migration.utils import YAMLStyle, dump_yaml, load_yaml
 import responses
 import pytest
-from ruamel.yaml import YAML
 
+from pipeline_migration.actions import migrate
 from pipeline_migration.actions.migrate import (
     ANNOTATION_HAS_MIGRATION,
     ANNOTATION_IS_MIGRATION,
     ANNOTATION_TRUTH_VALUE,
-    NotAPipelineFile,
     determine_task_bundle_upgrades_range,
     fetch_migration_file,
     IncorrectMigrationAttachment,
     LinkedMigrationsResolver,
-    resolve_pipeline,
     SimpleIterationResolver,
     TaskBundleMigration,
     TaskBundleUpgrade,
     TaskBundleUpgradesManager,
-    TEKTON_KIND_PIPELINE,
-    TEKTON_KIND_PIPELINE_RUN,
+    MigrationFileOperation,
+    PackageFile,
 )
 from pipeline_migration.quay import QuayTagInfo
 from pipeline_migration.registry import Container
-from pipeline_migration.utils import load_yaml, dump_yaml
 from tests.utils import generate_digest
 
 
@@ -172,133 +169,6 @@ class TestTaskBundleUpgrade:
         )
         assert upgrade.current_bundle == f"{APP_IMAGE_REPO}:0.1@{current_digest}"
         assert upgrade.new_bundle == f"{APP_IMAGE_REPO}:0.2@{new_digest}"
-
-
-class TestResolvePipeline:
-
-    def test_resolve_from_a_pipeline_definition(self, pipeline_yaml, tmp_path):
-        pipeline_file = tmp_path / "pl.yaml"
-        pipeline_file.write_text(pipeline_yaml)
-        with resolve_pipeline(pipeline_file) as f:
-            assert pipeline_yaml == Path(f).read_text()
-
-    def test_resolve_from_a_pipeline_run_definition(self, pipeline_run_yaml, tmp_path):
-        pipeline_file = tmp_path / "plr.yaml"
-        pipeline_file.write_text(pipeline_run_yaml)
-        with resolve_pipeline(pipeline_file) as f:
-            resolved_pipeline = load_yaml(f)
-            assert "spec" in resolved_pipeline
-            pipeline_run = load_yaml(pipeline_file)
-            assert resolved_pipeline["spec"] == pipeline_run["spec"]["pipelineSpec"]
-
-    def test_updates_to_pipeline_are_dumped(self, pipeline_and_run_yaml, tmp_path):
-        pipeline_file = tmp_path / "file.yaml"
-        pipeline_file.write_text(pipeline_and_run_yaml)
-
-        with resolve_pipeline(pipeline_file) as f:
-            pl = load_yaml(f)
-            pl["spec"]["tasks"].append({"name": "test"})
-            dump_yaml(f, pl)
-
-        doc = load_yaml(pipeline_file)
-        if doc["kind"] == TEKTON_KIND_PIPELINE:
-            tasks = doc["spec"]["tasks"]
-        elif doc["kind"] == TEKTON_KIND_PIPELINE_RUN:
-            tasks = doc["spec"]["pipelineSpec"]["tasks"]
-        else:
-            raise ValueError(f"Unexpected kind {doc['kind']}")
-
-        assert tasks[-1]["name"] == "test"
-
-    def test_formatting_ensure_quotes_are_preserved(self, pipeline_and_run_yaml, tmp_path):
-        pipeline_file = tmp_path / "file.yaml"
-        pipeline_file.write_text(pipeline_and_run_yaml)
-
-        original_yaml = pipeline_file.read_text().rstrip()
-
-        with resolve_pipeline(pipeline_file) as file_path:
-            # Make changes to ensure the resolve_pipeline writes content
-            # to the original pipeline file
-            with open(file_path, "r") as stream:
-                content = stream.read()
-            with open(file_path, "w+") as stream:
-                stream.write("---\n")
-                stream.write(content)
-
-        changed_yaml = pipeline_file.read_text().strip("-\n")
-        assert changed_yaml == original_yaml
-
-    @patch("pipeline_migration.actions.migrate.dump_yaml")
-    def test_do_not_save_if_pipeline_is_not_modified(
-        self, mock_dump_yaml, pipeline_and_run_yaml, tmp_path
-    ):
-        pipeline_file = tmp_path / "plr.yaml"
-        pipeline_file.write_text(pipeline_and_run_yaml)
-
-        with resolve_pipeline(pipeline_file):
-            pass  # Nothing is changed
-
-        doc = YAML().load(pipeline_and_run_yaml)
-        if doc["kind"] == TEKTON_KIND_PIPELINE:
-            assert mock_dump_yaml.call_count == 0
-        elif doc["kind"] == TEKTON_KIND_PIPELINE_RUN:
-            assert mock_dump_yaml.call_count == 1
-
-    def test_do_not_handle_pipelineref(self, tmp_path):
-        pipeline_file = tmp_path / "plr.yaml"
-        content = dedent(
-            """\
-            apiVersion: tekton.dev/v1
-            kind: PipelineRun
-            metadata:
-                name: plr
-            spec:
-                pipelineRef:
-                    name: pipeline
-            """
-        )
-        pipeline_file.write_text(content)
-        with pytest.raises(NotAPipelineFile, match="PipelineRun definition seems not embedded"):
-            with resolve_pipeline(pipeline_file):
-                pass
-
-    def test_given_file_is_not_yaml_file(self, tmp_path):
-        pipeline_file = tmp_path / "invalid.file"
-        pipeline_file.write_text("hello world")
-        with pytest.raises(NotAPipelineFile, match="not a YAML mapping"):
-            with resolve_pipeline(pipeline_file):
-                pass
-
-    def test_empty_pipeline_run(self, tmp_path):
-        pipeline_file = tmp_path / "plr.yaml"
-        content = dedent(
-            """\
-            apiVersion: tekton.dev/v1
-            kind: PipelineRun
-            metadata:
-                name: plr
-            spec:
-            """
-        )
-        pipeline_file.write_text(content)
-        with pytest.raises(NotAPipelineFile, match="neither .pipelineSpec nor .pipelineRef field"):
-            with resolve_pipeline(pipeline_file):
-                pass
-
-    def test_given_file_does_not_have_known_kind(self, tmp_path):
-        pipeline_file = tmp_path / "plr.yaml"
-        content = dedent(
-            """\
-            apiVersion: tekton.dev/v1
-            spec:
-            """
-        )
-        pipeline_file.write_text(content)
-        with pytest.raises(
-            NotAPipelineFile, match="does not have knownn kind Pipeline or PipelineRun"
-        ):
-            with resolve_pipeline(pipeline_file):
-                pass
 
 
 RENOVATE_UPGRADES: list[dict[str, Any]] = [
@@ -536,50 +406,48 @@ class TestResolveMigrations:
         assert script_content == migrations[0].migration_script
 
 
-class TestApplyMigrations:
+class TestMigrationFileOperationHandlePipelineFile:
+    """Test MigrationFileOperation"""
 
-    @pytest.mark.parametrize("chdir", [True, False])
-    def test_apply_migrations(self, pipeline_yaml, chdir, tmp_path, monkeypatch):
-        """Ensure applying all resolved migrations"""
+    def prepare(self, tmp_path, pipeline_content):
+        tb_upgrade = TaskBundleUpgrade(
+            dep_name=TASK_BUNDLE_CLONE,
+            current_value="0.1",
+            current_digest="sha256:cff6b68a194a",
+            new_value="0.2",
+            new_digest="sha256:96e797480ac5",
+        )
 
-        renovate_upgrades = [
-            {
-                "depName": TASK_BUNDLE_CLONE,
-                "currentValue": "0.1",
-                "currentDigest": "sha256:cff6b68a194a",
-                "newValue": "0.2",
-                "newDigest": "sha256:96e797480ac5",
-                "depTypes": ["tekton-bundle"],
-                "packageFile": ".tekton/pipeline.yaml",
-                "parentDir": ".tekton",
-            },
-        ]
-        manager = TaskBundleUpgradesManager(renovate_upgrades, SimpleIterationResolver)
+        self.package_file = PackageFile(file_path=".tekton/pipeline.yaml", parent_dir=".tekton")
+        self.package_file.task_bundle_upgrades.append(tb_upgrade)
 
-        # Not really resolve migrations. Mock them instead, then apply.
-        tb_upgrade = list(manager._task_bundle_upgrades.values())[0]
-
-        c = Container(f"{tb_upgrade.dep_name}:{tb_upgrade.new_value}@{generate_digest()}")
-        m = TaskBundleMigration(task_bundle=c.uri_with_tag, migration_script="echo add a new task")
+        m = TaskBundleMigration(
+            task_bundle=f"{tb_upgrade.dep_name}:{tb_upgrade.new_value}@{generate_digest()}",
+            migration_script="echo add a new task",
+        )
         tb_upgrade.migrations.append(m)
 
         # Less content of the migration script than previous one, which covers file truncate.
-        c = Container(f"{tb_upgrade.dep_name}:{tb_upgrade.new_value}@{generate_digest()}")
-        m = TaskBundleMigration(task_bundle=c.uri_with_tag, migration_script="echo hello")
+        m = TaskBundleMigration(
+            task_bundle=f"{tb_upgrade.dep_name}:{tb_upgrade.new_value}@{generate_digest()}",
+            migration_script="echo hello",
+        )
         tb_upgrade.migrations.append(m)
 
-        c = Container(f"{tb_upgrade.dep_name}:{tb_upgrade.new_value}@{tb_upgrade.new_digest}")
         m = TaskBundleMigration(
-            task_bundle=c.uri_with_tag, migration_script="echo remove task param"
+            task_bundle=f"{tb_upgrade.dep_name}:{tb_upgrade.new_value}@{tb_upgrade.new_digest}",
+            migration_script="echo remove task param",
         )
         tb_upgrade.migrations.append(m)
 
         tekton_dir = tmp_path / ".tekton"
         tekton_dir.mkdir()
-        package_file = tekton_dir / "pipeline.yaml"
-        package_file.write_text(pipeline_yaml)
+        (tekton_dir / "pipeline.yaml").write_text(pipeline_content)
 
-        test_context = {"executed_scripts": []}
+    def test_apply_migrations(self, pipeline_and_run_yaml, tmp_path, monkeypatch):
+        """Ensure migrations are applied to given pipeline"""
+        self.prepare(tmp_path, pipeline_and_run_yaml)
+
         counter = itertools.count()
 
         def _mkstemp(*args, **kwargs):
@@ -589,68 +457,73 @@ class TestApplyMigrations:
             return fd, tmp_file_path
 
         def subprocess_run(*args, **kwargs):
+            # Modify the pipeline
             cmd = args[0]
-            with open(cmd[-2], "r") as f:
-                test_context["executed_scripts"].append(f.read())
+            pipeline_file = cmd[-1]
+            style = YAMLStyle.detect(pipeline_file)
+            doc = load_yaml(pipeline_file, style)
+            doc["spec"]["tasks"].append({"name": "test"})
+            # simulate yq to indent block sequences with 2 spaces
+            style.indentation.indent(2)
+            dump_yaml(pipeline_file, doc, style)
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
         monkeypatch.setattr("tempfile.mkstemp", _mkstemp)
         monkeypatch.setattr("subprocess.run", subprocess_run)
 
-        if chdir:
-            monkeypatch.chdir(tmp_path)
-            manager.apply_migrations()
+        monkeypatch.chdir(tmp_path)
+        op = MigrationFileOperation(self.package_file.task_bundle_upgrades)
+        op.handle(self.package_file.file_path)
 
-            expected = ["echo add a new task", "echo hello", "echo remove task param"]
-            assert test_context["executed_scripts"] == expected
+        doc = load_yaml(self.package_file.file_path)
+        if "kind: PipelineRun" in pipeline_and_run_yaml:
+            tasks = doc["spec"]["pipelineSpec"]["tasks"]
         else:
-            with pytest.raises(ValueError, match="Pipeline file does not exist: .+"):
-                manager.apply_migrations()
+            tasks = doc["spec"]["tasks"]
 
-    def test_raise_error_if_migration_process_fails(
-        self, pipeline_yaml, caplog, monkeypatch, tmp_path
-    ):
-        caplog.set_level(logging.DEBUG, logger="migrate")
+        assert tasks[-1] == {"name": "test"}
 
-        renovate_upgrades = [
-            {
-                "depName": TASK_BUNDLE_CLONE,
-                "currentValue": "0.1",
-                "currentDigest": "sha256:cff6b68a194a",
-                "newValue": "0.2",
-                "newDigest": "sha256:96e797480ac5",
-                "depTypes": ["tekton-bundle"],
-                "packageFile": ".tekton/pipeline.yaml",
-                "parentDir": ".tekton",
-            },
-        ]
-        manager = TaskBundleUpgradesManager(renovate_upgrades, SimpleIterationResolver)
+        # Verify the original formatting is preserved
+        assert pipeline_and_run_yaml in Path(self.package_file.file_path).read_text()
 
-        # Not really resolve migrations. Mock them instead, then apply.
-        tb_upgrade = list(manager._task_bundle_upgrades.values())[0]
-        c = Container(tb_upgrade.dep_name)
+    def test_do_not_save_if_no_changes(self, pipeline_and_run_yaml, monkeypatch, tmp_path):
+        self.prepare(tmp_path, pipeline_and_run_yaml)
 
-        c.tag = tb_upgrade.new_value
-        c.digest = generate_digest()
-        tb_upgrade.migrations.append(
-            TaskBundleMigration(task_bundle=c.uri_with_tag, migration_script="echo add a new task")
-        )
+        counter = itertools.count()
 
-        c.tag = tb_upgrade.new_value
-        c.digest = tb_upgrade.new_digest
-        tb_upgrade.migrations.append(
-            TaskBundleMigration(
-                task_bundle=c.uri_with_tag, migration_script="echo remove task param"
-            )
-        )
-
-        tekton_dir = tmp_path / ".tekton"
-        tekton_dir.mkdir()
-        package_file = tekton_dir / "pipeline.yaml"
-        package_file.write_text(pipeline_yaml)
+        expected_dump_yaml_calls = 0  # for Pipeline
+        if "kind: PipelineRun" in pipeline_and_run_yaml:
+            # At least one dump_yaml call to write pipeline definition into a temp file.
+            expected_dump_yaml_calls = 1
 
         def _mkstemp(*args, **kwargs):
-            tmp_file_path = tmp_path / "migration_file"
+            tmp_file_path = tmp_path / f"temp_file-{next(counter)}"
+            tmp_file_path.write_text("")
+            fd = os.open(tmp_file_path, os.O_RDWR)
+            return fd, tmp_file_path
+
+        monkeypatch.setattr("tempfile.mkstemp", _mkstemp)
+        monkeypatch.setattr(
+            "subprocess.run",
+            lambda cmd, **kwargs: subprocess.CompletedProcess(cmd, 0, stdout="", stderr=""),
+        )
+
+        monkeypatch.chdir(tmp_path)
+        op = MigrationFileOperation(self.package_file.task_bundle_upgrades)
+        with patch.object(migrate, "dump_yaml", wraps=migrate.dump_yaml) as mock_dump_yaml:
+            op.handle(self.package_file.file_path)
+            assert mock_dump_yaml.call_count == expected_dump_yaml_calls
+
+    def test_raise_error_if_migration_process_fails(
+        self, pipeline_and_run_yaml, caplog, monkeypatch, tmp_path
+    ):
+        self.prepare(tmp_path, pipeline_and_run_yaml)
+
+        caplog.set_level(logging.DEBUG, logger="migrate")
+        counter = itertools.count()
+
+        def _mkstemp(*args, **kwargs):
+            tmp_file_path = tmp_path / f"temp-file-{next(counter)}"
             tmp_file_path.write_text("")
             fd = os.open(tmp_file_path, os.O_RDWR)
             return fd, tmp_file_path
@@ -665,8 +538,9 @@ class TestApplyMigrations:
         monkeypatch.setattr("subprocess.run", subprocess_run)
 
         monkeypatch.chdir(tmp_path)
+        op = MigrationFileOperation(self.package_file.task_bundle_upgrades)
         with pytest.raises(subprocess.CalledProcessError):
-            manager.apply_migrations()
+            op.handle(self.package_file.file_path)
 
         assert "something is wrong" in caplog.text
 

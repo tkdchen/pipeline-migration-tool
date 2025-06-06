@@ -8,25 +8,22 @@ import tempfile
 from abc import ABC, abstractmethod
 from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Final, Any
 
 from jsonschema.exceptions import ValidationError
 from jsonschema.validators import Draft202012Validator
 
-from pipeline_migration.utils import dump_yaml, load_yaml, file_checksum
-from pipeline_migration.registry import Container, Registry, ImageIndex
+from pipeline_migration.pipeline import PipelineFileOperation
 from pipeline_migration.quay import QuayTagInfo, list_active_repo_tags
+from pipeline_migration.registry import Container, Registry, ImageIndex
 from pipeline_migration.types import FilePath
-from pipeline_migration.utils import is_true, YAMLStyle
+from pipeline_migration.utils import is_true, file_checksum, load_yaml, dump_yaml, YAMLStyle
 
 ANNOTATION_HAS_MIGRATION: Final[str] = "dev.konflux-ci.task.has-migration"
 ANNOTATION_IS_MIGRATION: Final[str] = "dev.konflux-ci.task.is-migration"
 ANNOTATION_PREVIOUS_MIGRATION_BUNDLE: Final[str] = "dev.konflux-ci.task.previous-migration-bundle"
 
-TEKTON_KIND_PIPELINE: Final = "Pipeline"
-TEKTON_KIND_PIPELINE_RUN: Final = "PipelineRun"
 ANNOTATION_TRUTH_VALUE: Final = "true"
 
 # Example:  0.1-18a61693389c6c912df587f31bc3b4cc53eb0d5b
@@ -102,63 +99,6 @@ class InvalidRenovateUpgradesData(ValueError):
     """Raise this error if any required data is missing in the given Renovate upgrades"""
 
 
-class NotAPipelineFile(Exception):
-    """Raise if a file does not include a pipeline definition"""
-
-
-@contextmanager
-def resolve_pipeline(pipeline_file: FilePath) -> Generator[FilePath, Any, None]:
-    """Yield resolved pipeline file
-
-    :param pipeline_file:
-    :type pipeline_file: str
-    :return: a generator yielding a file containing the pipeline definition.
-    :raises NotAPipelineFile: if a YAML file is not a Pipeline definition or a
-        PipelineRun with embedded pipelineSpec.
-    """
-    yaml_style = YAMLStyle.detect(pipeline_file)
-    origin_pipeline = load_yaml(pipeline_file, style=yaml_style)
-
-    if not isinstance(origin_pipeline, dict):
-        raise NotAPipelineFile(f"Given file {pipeline_file} is not a YAML mapping.")
-
-    kind = origin_pipeline.get("kind")
-    if kind == TEKTON_KIND_PIPELINE:
-        origin_checksum = file_checksum(pipeline_file)
-        yield pipeline_file
-        if file_checksum(pipeline_file) != origin_checksum:
-            pl_yaml = load_yaml(pipeline_file, style=yaml_style)
-            dump_yaml(pipeline_file, pl_yaml, style=yaml_style)
-    elif kind == TEKTON_KIND_PIPELINE_RUN:
-        spec = origin_pipeline.get("spec") or {}
-        if "pipelineSpec" in spec:
-            # pipeline definition is inline the PipelineRun
-            fd, temp_pipeline_file = tempfile.mkstemp(suffix="-pipeline")
-            os.close(fd)
-            pipeline = {"spec": spec["pipelineSpec"]}
-            dump_yaml(temp_pipeline_file, pipeline, style=yaml_style)
-            origin_checksum = file_checksum(temp_pipeline_file)
-            yield temp_pipeline_file
-            if file_checksum(temp_pipeline_file) != origin_checksum:
-                modified_pipeline = load_yaml(temp_pipeline_file, style=yaml_style)
-                spec["pipelineSpec"] = modified_pipeline["spec"]
-                dump_yaml(pipeline_file, origin_pipeline, style=yaml_style)
-        elif "pipelineRef" in spec:
-            # Pipeline definition can be referenced here, via either git-resolver or a name field
-            # pointing to YAML file under the .tekton/.
-            # In this case, Renovate should not handle the given file as a package file since
-            # there is no task bundle references.
-            raise NotAPipelineFile("PipelineRun definition seems not embedded.")
-        else:
-            raise NotAPipelineFile(
-                "PipelineRun .spec field includes neither .pipelineSpec nor .pipelineRef field."
-            )
-    else:
-        raise NotAPipelineFile(
-            f"Given file {pipeline_file} does not have knownn kind Pipeline or PipelineRun."
-        )
-
-
 # TODO: cache this as well?
 def determine_task_bundle_upgrades_range(
     task_bundle_upgrade: TaskBundleUpgrade,
@@ -203,6 +143,71 @@ def determine_task_bundle_upgrades_range(
         f"Neither old task bundle {current_bundle} nor newer task bundle {new_bundle}"
         " is present in the registry."
     )
+
+
+class MigrationFileOperation(PipelineFileOperation):
+
+    def __init__(self, task_bundle_upgrades: list[TaskBundleUpgrade]):
+        self._task_bundle_upgrades = task_bundle_upgrades
+
+    def _apply_migration(self, file_path: FilePath) -> None:
+        fd, migration_file = tempfile.mkstemp(suffix="-migration-file")
+        prev_size = 0
+        try:
+            for task_bundle_upgrade in self._task_bundle_upgrades:
+                for migration in task_bundle_upgrade.migrations:
+                    logger.info(
+                        "Apply migration of task bundle %s in package file %s",
+                        migration.task_bundle,
+                        file_path,
+                    )
+
+                    os.lseek(fd, 0, 0)
+                    content = migration.migration_script.encode("utf-8")
+                    if len(content) < prev_size:
+                        os.truncate(fd, len(content))
+                    prev_size = os.write(fd, content)
+
+                    cmd = ["bash", migration_file, file_path]
+                    logger.debug("Run: %r", cmd)
+                    proc = sp.run(cmd, stderr=sp.STDOUT, stdout=sp.PIPE)
+                    logger.debug("%r", proc.stdout)
+                    proc.check_returncode()
+        finally:
+            os.close(fd)
+            os.unlink(migration_file)
+
+    def handle_pipeline_file(self, file_path: FilePath, loaded_doc: Any, style: YAMLStyle) -> None:
+        yaml_style = style
+        origin_checksum = file_checksum(file_path)
+        self._apply_migration(file_path)
+        if file_checksum(file_path) != origin_checksum:
+            # By design, migration scripts invoke yq to apply changes to pipeline YAML and
+            # the result YAML includes indented block sequences.
+            # This load-dump round-trip ensures the original YAML formatting is preserved
+            # as much as possible.
+            pl_yaml = load_yaml(file_path, style=yaml_style)
+            dump_yaml(file_path, pl_yaml, style=yaml_style)
+
+    def handle_pipeline_run_file(
+        self, file_path: FilePath, loaded_doc: Any, style: YAMLStyle
+    ) -> None:
+        yaml_style = style
+        original_pipeline_doc = loaded_doc
+
+        fd, temp_pipeline_file = tempfile.mkstemp(suffix="-pipeline")
+        os.close(fd)
+
+        pipeline_spec = {"spec": original_pipeline_doc["spec"]["pipelineSpec"]}
+        dump_yaml(temp_pipeline_file, pipeline_spec, style=yaml_style)
+        origin_checksum = file_checksum(temp_pipeline_file)
+
+        self._apply_migration(temp_pipeline_file)
+
+        if file_checksum(temp_pipeline_file) != origin_checksum:
+            modified_pipeline = load_yaml(temp_pipeline_file, style=yaml_style)
+            original_pipeline_doc["spec"]["pipelineSpec"] = modified_pipeline["spec"]
+            dump_yaml(file_path, original_pipeline_doc, style=yaml_style)
 
 
 class TaskBundleUpgradesManager:
@@ -257,32 +262,8 @@ class TaskBundleUpgradesManager:
         for package_file in self.package_files:
             if not os.path.exists(package_file.file_path):
                 raise ValueError(f"Pipeline file does not exist: {package_file.file_path}")
-            with resolve_pipeline(package_file.file_path) as pipeline_file:
-                fd, migration_file = tempfile.mkstemp(suffix="-migration-file")
-                prev_size = 0
-                try:
-                    for task_bundle_upgrade in package_file.task_bundle_upgrades:
-                        for migration in task_bundle_upgrade.migrations:
-                            logger.info(
-                                "Apply migration of task bundle %s in package file %s",
-                                migration.task_bundle,
-                                package_file.file_path,
-                            )
-
-                            os.lseek(fd, 0, 0)
-                            content = migration.migration_script.encode("utf-8")
-                            if len(content) < prev_size:
-                                os.truncate(fd, len(content))
-                            prev_size = os.write(fd, content)
-
-                            cmd = ["bash", migration_file, pipeline_file]
-                            logger.debug("Run: %r", cmd)
-                            proc = sp.run(cmd, stderr=sp.STDOUT, stdout=sp.PIPE)
-                            logger.debug("%r", proc.stdout)
-                            proc.check_returncode()
-                finally:
-                    os.close(fd)
-                    os.unlink(migration_file)
+            op = MigrationFileOperation(package_file.task_bundle_upgrades)
+            op.handle(package_file.file_path)
 
 
 class IncorrectMigrationAttachment(Exception):

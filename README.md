@@ -1,7 +1,7 @@
 # Pipeline Migration Tool
 
-Pipeline migration tool is a command line tool providing several sub-commands
-for Konflux users to manage their build pipelines.
+Pipeline migration tool is command line tool applying migrations for Konflux pipelines. It also
+allows to modify Konflux build pipelines locally.
 
 ## Commands
 
@@ -69,7 +69,7 @@ The field names map to the [Renovate template fields]
 * `parentDir`: `{{parentDir}}`
 * `depTypes`: `{{depTypes}}`
 
-To generate the list, handlebars built-in each helper of Renovate is used.
+To generate the list, handlebars built-in `each` helper of Renovate is used.
 
 ### Add a Konflux task to build pipeline with `add-task`
 

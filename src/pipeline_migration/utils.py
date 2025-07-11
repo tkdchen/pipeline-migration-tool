@@ -45,6 +45,10 @@ class _NodePath:
     field: str = ""
 
 
+def is_flow_style_seq(node: CommentedSeq) -> bool:
+    return len(node) == 0 or node.fa.flow_style()
+
+
 @dataclass
 class YAMLStyle:
     indentation: BlockSequenceIndentation
@@ -66,7 +70,7 @@ class YAMLStyle:
                     parent_nodes[-1].field = key
                     _walk(value)
                 parent_nodes.pop()
-            elif isinstance(node, CommentedSeq):
+            elif isinstance(node, CommentedSeq) and not is_flow_style_seq(node):
                 levels = node.lc.col - parent_nodes[-1].node.lc.col
                 if levels in indentations:
                     indentations[levels] += 1

@@ -28,6 +28,22 @@ spec:
     - name: build-container
 """
 
+YAML_EXAMPLE_3_INDENTS = """\
+apiVersion: tekton.dev/v1
+spec:
+  params:
+    - name: git-url
+      type: string
+    - name: revision
+      type: string
+    - name: build-args
+      type: array
+      default: []
+  tasks:
+    - name: clone-repository
+    - name: build-container
+"""
+
 YAML_EXAMPLE_MIXED_INDENT_LEVELS = """\
 apiVersion: tekton.dev/v1
 spec:
@@ -50,6 +66,27 @@ spec:
        - name: show-sbom
 """
 
+YAML_EMPTY_FLOW_SEQ = """\
+spec:
+  params:
+    - name: git-url
+      type: string
+      default: []
+    - name: revision
+      type: string
+"""
+
+YAML_FLOW_SEQ_WITH_VALUES = """\
+spec:
+  params:
+    - name: git-url
+      type: string
+    - name: revision
+      type: string
+    - build-args: ["maintainer=build",
+         "build-date=someday"]
+"""
+
 
 @pytest.mark.parametrize(
     "yaml,expected",
@@ -57,6 +94,8 @@ spec:
         [YAML_EXAMPLE_0_INDENT, [True, {0: 2}]],
         [YAML_EXAMPLE_2_INDENTS, [True, {2: 2}]],
         [YAML_EXAMPLE_MIXED_INDENT_LEVELS, [False, {2: 1, 0: 1, 1: 2, 5: 1}]],
+        [YAML_EMPTY_FLOW_SEQ, [True, {2: 1}]],
+        [YAML_FLOW_SEQ_WITH_VALUES, [True, {2: 1}]],
     ],
 )
 def test_indentation_detection(yaml, expected, tmp_path):
@@ -124,7 +163,9 @@ def test_dump_yaml_with_style(style, data, expected_yaml, tmp_path):
     assert yaml_file.read_text() == expected_yaml
 
 
-@pytest.mark.parametrize("yaml_content", [YAML_EXAMPLE_0_INDENT, YAML_EXAMPLE_2_INDENTS])
+@pytest.mark.parametrize(
+    "yaml_content", [YAML_EXAMPLE_0_INDENT, YAML_EXAMPLE_2_INDENTS, YAML_EXAMPLE_3_INDENTS]
+)
 def test_dump_same_yaml_with_consistent_indentation_formatting(yaml_content, tmp_path):
     yaml_file = tmp_path / "file.yaml"
     yaml_file.write_text(yaml_content)

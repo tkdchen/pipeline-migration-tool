@@ -1,4 +1,5 @@
 import json
+import logging
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -230,9 +231,11 @@ class TestMigrateSingleTaskBundleUpgrade:
 
     @responses.activate
     @pytest.mark.parametrize("use_linked_migrations", [True, False])
+    @pytest.mark.parametrize("use_upgrades_file", [True, False])
     def test_apply_migrations(
         self,
         use_linked_migrations,
+        use_upgrades_file,
         pipeline_yaml_with_various_indent_styles,
         monkeypatch,
         tmp_path,
@@ -283,7 +286,12 @@ class TestMigrateSingleTaskBundleUpgrade:
         # This change simulates that behavior.
         monkeypatch.chdir(tmp_path)
 
-        cli_cmd = ["pmt", "migrate", "-u", json.dumps(tb_upgrades)]
+        if use_upgrades_file:
+            upgrades_file_path = tmp_path / "upgrades-file.json"
+            upgrades_file_path.write_text(json.dumps(tb_upgrades))
+            cli_cmd = ["pmt", "migrate", "-f", str(upgrades_file_path)]
+        else:
+            cli_cmd = ["pmt", "migrate", "-u", json.dumps(tb_upgrades)]
 
         if use_linked_migrations:
             test_data = MockRegistry.test_data[0]
@@ -422,8 +430,15 @@ def test_cli_stops_if_input_upgrades_is_invalid(upgrades, expected_err_msgs, mon
 
 
 @pytest.mark.parametrize("upgrades", ["", "[]", "[{}]"])
-def test_do_nothing_if_input_upgrades_is_empty(upgrades, monkeypatch):
-    cli_cmd = ["pmt", "migrate", "-u", upgrades]
+@pytest.mark.parametrize("use_upgrades_file", [True, False])
+def test_do_nothing_if_input_upgrades_is_empty(upgrades, use_upgrades_file, monkeypatch, tmp_path):
+    if use_upgrades_file:
+        upgrades_file_path = tmp_path / "upgrades.json"
+        upgrades_file_path.write_text(upgrades)
+        cli_cmd = ["pmt", "migrate", "-f", str(upgrades_file_path)]
+    else:
+        cli_cmd = ["pmt", "migrate", "-u", upgrades]
+
     monkeypatch.setattr("sys.argv", cli_cmd)
 
     called = [False]
@@ -683,3 +698,20 @@ def test_clean_upgrades(upgrades_json_s, expected, monkeypatch):
             upgrades_json_s = upgrades_json_s.replace('"set_local_test",', "")
             monkeypatch.setenv("PMT_LOCAL_TEST", "1")
         assert clean_upgrades(upgrades_json_s) == expected
+
+
+def test_missing_both_upgrades_args(caplog, monkeypatch):
+    cli_cmd = ["pmt", "migrate"]
+    monkeypatch.setattr("sys.argv", cli_cmd)
+    with caplog.at_level(logging.INFO):
+        entry_point()
+        assert "Empty input upgrades" in caplog.text
+
+
+def test_nonexisting_upgrades_file(capsys, monkeypatch, tmp_path):
+    upgrades_file = str(tmp_path / "upgrades.json")
+    cli_cmd = ["pmt", "migrate", "-f", upgrades_file]
+    monkeypatch.setattr("sys.argv", cli_cmd)
+    monkeypatch.setattr("sys.exit", lambda *args, **kwargs: 0)
+    entry_point()
+    assert f"Upgrades file {upgrades_file} does not exist" in capsys.readouterr().err

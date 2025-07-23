@@ -2,6 +2,8 @@ import pytest
 from copy import deepcopy
 from textwrap import dedent
 from typing import Final
+from pathlib import Path
+import tempfile
 
 import responses
 
@@ -245,3 +247,16 @@ def component_b_repo(tmp_path, pipeline_yaml) -> RepoPath:
     yaml_file = component_b_tekton / "build-pipeline.yaml"
     yaml_file.write_text(pipeline_yaml)
     return RepoPath(component_b_tekton.parent)
+
+
+@pytest.fixture
+def create_yaml_file(tmp_path):
+    def _create(yaml_content) -> Path:
+        with tempfile.NamedTemporaryFile(
+            dir=tmp_path, mode="w", delete=False, suffix=".yaml", encoding="utf-8"
+        ) as f:
+            f.write(yaml_content)
+            tmp_file = Path(f.name)
+        return tmp_file
+
+    return _create

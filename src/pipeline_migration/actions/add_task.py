@@ -27,22 +27,22 @@ The following are several examples with a Konflux task push-dockerfile:
 * Add task with latest bundle to pipelines within relative .tekton/ directory.
 
     cd /path/to/repo
-    pipeline-migration-tool add-task push-dockerfile
+    pmt add-task push-dockerfile
 
 * Add task to multiple pipelines in several repositories:
 
-    pipeline-migration-tool add-task push-dockerfile \\
+    pmt add-task push-dockerfile \\
         /path/to/repo1/.tekton/pr.yaml /path/to/repo2/.tekton/push.yaml
 
 * Add task with parameter and execution order:
 
-    pipeline-migration-tool add-task push-dockerfile \\
+    pmt add-task push-dockerfile \\
         --param param1=value1 --param param2=value2 \\
         --run-after build-image-index
 
 * Add task with specific bundle reference:
 
-    pipeline-migration-tool add-task --bundle-ref <bundle-reference> push-dockerfile
+    pmt add-task --bundle-ref <bundle-reference> push-dockerfile
 """
 
 

@@ -35,7 +35,7 @@ To apply migrations, run command:
 
 ```bash
 cd path/to/repo
-pipeline-migration-tool migrate -u '<upgrades>'
+pmt migrate -u '<upgrades>'
 ```
 
 `upgrades` is a JSON string encoded from a list of mappings. Each mapping includes data for a
@@ -80,7 +80,7 @@ command usages:
 * Add task with latest bundle to pipelines from inside a repository:
 
   ```bash
-  pipeline-migration-tool add-task sast-coverity-check
+  pmt add-task sast-coverity-check
   ```
 
   where `./.tekton/` is the default location to search pipelines.
@@ -88,19 +88,19 @@ command usages:
 * Add task to multiple locations:
 
   ```bash
-  pipeline-migration-tool add-task sast-coverity-check \
+  pmt add-task sast-coverity-check \
     /path/to/repo1/pipeline.yaml /path/to/repo2/pipeline-run.yaml ...
   ```
 
 * Specify alternative task bundle explicitly:
 
   ```bash
-  pipeline-migration-tool add-task --bundle-ref quay.io/konflux-ci/tekton-catalog/task-sast-coverity-check:0.1@sha256:... \
+  pmt add-task --bundle-ref quay.io/konflux-ci/tekton-catalog/task-sast-coverity-check:0.1@sha256:... \
     sast-coverity-check \
     /path/to/repo1/pipeline.yaml /path/to/repo2/pipeline-run.yaml ...
   ```
 
-Get more information by `pipeline-migration-tool add-task -h`
+Get more information by `pmt add-task -h`
 
 ## Run tests
 
@@ -153,7 +153,7 @@ QUAY_NAMESPACE="<quay namespace passed to build-definitions/hack/build-and-push.
 ./hack/integration-test/setup.sh
 
 cd ./hack/integration-test/app
-PMT_LOCAL_TEST=1 pipeline-migration-tool migrate -u "$(cat /tmp/pmt-test-upgrades.txt)"
+PMT_LOCAL_TEST=1 pmt migrate -u "$(cat /tmp/pmt-test-upgrades.txt)"
 
 # Check if the tool works as expected.
 ```

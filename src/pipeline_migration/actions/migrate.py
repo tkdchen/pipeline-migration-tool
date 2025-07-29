@@ -7,7 +7,7 @@ import subprocess as sp
 import tempfile
 
 from abc import ABC, abstractmethod
-from collections.abc import Generator
+from collections.abc import Generator, Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -15,6 +15,8 @@ from typing import Final, Any
 
 from jsonschema.exceptions import ValidationError
 from jsonschema.validators import Draft202012Validator
+from packaging.version import parse as parse_version
+from packaging.version import Version
 
 from pipeline_migration.pipeline import PipelineFileOperation
 from pipeline_migration.quay import QuayTagInfo, list_active_repo_tags
@@ -101,6 +103,65 @@ class InvalidRenovateUpgradesData(ValueError):
     """Raise this error if any required data is missing in the given Renovate upgrades"""
 
 
+def only_tags_pinned_by_version_revision(tags_info: Iterable[dict]) -> Generator[dict, Any, None]:
+    regex = re.compile(TASK_TAG_REGEXP)
+    for tag_info in tags_info:
+        if regex.match(tag_info["name"]):
+            yield tag_info
+
+
+def filter_out_bundles_built_from_older_version(
+    tags_info: Iterable[dict], stop_at_digest: str
+) -> Generator[dict, Any, None]:
+    """Filter out bundles built from older versions
+
+    Generally, once a new version is bumped for a task, there should be no new
+    bundle build for the older versions. However, the corner case happened.
+    Refer to STONEBLD-3667.
+
+    Bundles built for older versions can be ignored because it does not make
+    sense to add migrations to an older version as Konflux users should always
+    follow the newer versions.
+
+    :param tags_info: tags information responded by Quay.io listRepoTags endpoint.
+        Each tag mapping must have a tag name pinned by version and revision, for
+        example, ``0.2-<commit hash>``.
+    :param stop_at_digest: str, stop iterating tags at the one with this digest.
+        Empty string causes iterating through all tags.
+    """
+    # Buffer parsed version for less parse_version calls
+    buffer: list[tuple[Version, dict]] = []
+
+    def _remove_smaller_versions(for_version: Version) -> None:
+        """Remove all smaller versions from the buffer in place"""
+        i = len(buffer) - 1
+        while True:
+            version, _ = buffer[i]
+            if version < for_version:
+                buffer.pop(i)
+            else:
+                break
+            i -= 1
+            if i < 0:
+                break
+
+    for cur_tag in tags_info:
+        cur_version = cur_tag["name"].split("-")[0]
+        parsed_cur_version = parse_version(cur_version)
+        if not buffer:
+            buffer.append((parsed_cur_version, cur_tag))
+            continue
+        last_parsed_version, _ = buffer[-1]
+        if last_parsed_version < parse_version(cur_version):
+            _remove_smaller_versions(parsed_cur_version)
+        buffer.append((parsed_cur_version, cur_tag))
+        if cur_tag["manifest_digest"] == stop_at_digest:
+            break
+
+    for _, tag_info in buffer:
+        yield tag_info
+
+
 # TODO: cache this as well?
 def determine_task_bundle_upgrades_range(
     task_bundle_upgrade: TaskBundleUpgrade,
@@ -117,17 +178,18 @@ def determine_task_bundle_upgrades_range(
     r: list[QuayTagInfo] = []
     in_range = False
     has_tag = False
-    task_tag_re = re.compile(TASK_TAG_REGEXP)
 
     current_bundle = task_bundle_upgrade.current_bundle
     new_bundle = task_bundle_upgrade.new_bundle
 
     c = Container(task_bundle_upgrade.dep_name)
-    for tag in list_active_repo_tags(c):
+    tags_info = filter_out_bundles_built_from_older_version(
+        only_tags_pinned_by_version_revision(list_active_repo_tags(c)),
+        task_bundle_upgrade.current_digest,
+    )
+    for tag in tags_info:
         quay_tag = QuayTagInfo(name=tag["name"], manifest_digest=tag["manifest_digest"])
         has_tag = True
-        if not task_tag_re.match(quay_tag.name):
-            continue
         if quay_tag.manifest_digest == task_bundle_upgrade.new_digest:
             r.append(quay_tag)
             in_range = True

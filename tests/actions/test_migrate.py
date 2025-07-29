@@ -660,3 +660,130 @@ class TestLinkedMigrationsResolver:
         resolver.resolve([tb_upgrade])
 
         assert len(tb_upgrade.migrations) == expected_migrations_count
+
+
+@pytest.mark.parametrize(
+    "tags_info,stop_at,expected",
+    [
+        pytest.param([], "", [], id="empty-input-tags"),
+        pytest.param(
+            [{"name": "0.2-2834", "manifest_digest": "sha256@1234"}],
+            "",
+            [{"name": "0.2-2834", "manifest_digest": "sha256@1234"}],
+            id="single-tag",
+        ),
+        pytest.param(
+            [
+                {"name": "0.2-2834", "manifest_digest": "sha256@1234"},
+                {"name": "0.2-4745", "manifest_digest": "sha256@4745"},
+            ],
+            "",
+            [
+                {"name": "0.2-2834", "manifest_digest": "sha256@1234"},
+                {"name": "0.2-4745", "manifest_digest": "sha256@4745"},
+            ],
+            id="two-tags-within-same-version",
+        ),
+        pytest.param(
+            [
+                {"name": "0.2-2834", "manifest_digest": "sha256@2834"},
+                {"name": "0.2-4745", "manifest_digest": "sha256@4745"},
+                {"name": "0.2-1028", "manifest_digest": "sha256@1028"},
+                {"name": "0.2-6582", "manifest_digest": "sha256@6582"},
+            ],
+            "",
+            [
+                {"name": "0.2-2834", "manifest_digest": "sha256@2834"},
+                {"name": "0.2-4745", "manifest_digest": "sha256@4745"},
+                {"name": "0.2-1028", "manifest_digest": "sha256@1028"},
+                {"name": "0.2-6582", "manifest_digest": "sha256@6582"},
+            ],
+            id="more-tags-within-version",
+        ),
+        pytest.param(
+            [
+                {"name": "0.3-2834", "manifest_digest": "sha256@2834"},
+                {"name": "0.2-4745", "manifest_digest": "sha256@4745"},
+            ],
+            "",
+            [
+                {"name": "0.3-2834", "manifest_digest": "sha256@2834"},
+                {"name": "0.2-4745", "manifest_digest": "sha256@4745"},
+            ],
+            id="two-tags-newer-version-is-built",
+        ),
+        pytest.param(
+            [
+                {"name": "0.2-4745", "manifest_digest": "sha256@4745"},
+                {"name": "0.3-2834", "manifest_digest": "sha256@2834"},
+            ],
+            "",
+            [{"name": "0.3-2834", "manifest_digest": "sha256@2834"}],
+            id="two-tags-older-version-is-built",
+        ),
+        pytest.param(
+            [
+                {"name": "0.2-abcd", "manifest_digest": "sha256@abcd"},
+                {"name": "0.3-0de3", "manifest_digest": "sha256@0de3"},
+                {"name": "0.2-4745", "manifest_digest": "sha256@4745"},
+                {"name": "0.3-6532", "manifest_digest": "sha256@6532"},
+                {"name": "0.3-2834", "manifest_digest": "sha256@2834"},
+                {"name": "0.2-e8f2", "manifest_digest": "sha256@e8f2"},
+            ],
+            "",
+            [
+                {"name": "0.3-0de3", "manifest_digest": "sha256@0de3"},
+                {"name": "0.3-6532", "manifest_digest": "sha256@6532"},
+                {"name": "0.3-2834", "manifest_digest": "sha256@2834"},
+                {"name": "0.2-e8f2", "manifest_digest": "sha256@e8f2"},
+            ],
+            id="tags-with-mixed-versions",
+        ),
+        pytest.param(
+            [
+                {"name": "0.2-8a2d", "manifest_digest": "sha256@8a2d"},
+                {"name": "0.1-e37f", "manifest_digest": "sha256@e37f"},
+                {"name": "0.2-abcd", "manifest_digest": "sha256@abcd"},
+                {"name": "0.3-0de3", "manifest_digest": "sha256@0de3"},
+                {"name": "0.2-4745", "manifest_digest": "sha256@4745"},
+                {"name": "0.1-f40f", "manifest_digest": "sha256@f40f"},
+                {"name": "0.2-9fed", "manifest_digest": "sha256@9fed"},
+                {"name": "0.3-6532", "manifest_digest": "sha256@6532"},
+                {"name": "0.3-2834", "manifest_digest": "sha256@2834"},
+                {"name": "0.2-e8f2", "manifest_digest": "sha256@e8f2"},
+            ],
+            "",
+            [
+                {"name": "0.3-0de3", "manifest_digest": "sha256@0de3"},
+                {"name": "0.3-6532", "manifest_digest": "sha256@6532"},
+                {"name": "0.3-2834", "manifest_digest": "sha256@2834"},
+                {"name": "0.2-e8f2", "manifest_digest": "sha256@e8f2"},
+            ],
+            id="tags-more-older-versions-are-built",
+        ),
+        pytest.param(
+            [
+                {"name": "0.2-8a2d", "manifest_digest": "sha256@8a2d"},
+                {"name": "0.1-e37f", "manifest_digest": "sha256@e37f"},
+                {"name": "0.2-abcd", "manifest_digest": "sha256@abcd"},
+                {"name": "0.3-0de3", "manifest_digest": "sha256@0de3"},
+                {"name": "0.2-4745", "manifest_digest": "sha256@4745"},
+                {"name": "0.1-f40f", "manifest_digest": "sha256@f40f"},
+                {"name": "0.2-9fed", "manifest_digest": "sha256@9fed"},
+                {"name": "0.3-6532", "manifest_digest": "sha256@6532"},
+                {"name": "0.3-2834", "manifest_digest": "sha256@2834"},
+                {"name": "0.2-e8f2", "manifest_digest": "sha256@e8f2"},
+            ],
+            "sha256@2834",
+            [
+                {"name": "0.3-0de3", "manifest_digest": "sha256@0de3"},
+                {"name": "0.3-6532", "manifest_digest": "sha256@6532"},
+                {"name": "0.3-2834", "manifest_digest": "sha256@2834"},
+            ],
+            id="tags-stop-earlier",
+        ),
+    ],
+)
+def test_filter_out_bundles_built_from_older_version(tags_info, stop_at, expected):
+    filter_out = migrate.filter_out_bundles_built_from_older_version
+    assert list(filter_out(tags_info, stop_at)) == expected

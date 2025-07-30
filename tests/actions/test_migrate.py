@@ -741,6 +741,8 @@ class TestLinkedMigrationsResolver:
         ),
         pytest.param(
             [
+                {"name": "0.3-fed0", "manifest_digest": "sha256@fed0"},
+                {"name": "0.4-def4", "manifest_digest": "sha256@def4"},
                 {"name": "0.2-8a2d", "manifest_digest": "sha256@8a2d"},
                 {"name": "0.1-e37f", "manifest_digest": "sha256@e37f"},
                 {"name": "0.2-abcd", "manifest_digest": "sha256@abcd"},
@@ -754,6 +756,7 @@ class TestLinkedMigrationsResolver:
             ],
             "",
             [
+                {"name": "0.4-def4", "manifest_digest": "sha256@def4"},
                 {"name": "0.3-0de3", "manifest_digest": "sha256@0de3"},
                 {"name": "0.3-6532", "manifest_digest": "sha256@6532"},
                 {"name": "0.3-2834", "manifest_digest": "sha256@2834"},

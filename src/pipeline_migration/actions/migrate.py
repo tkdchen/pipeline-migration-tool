@@ -115,9 +115,8 @@ def filter_out_bundles_built_from_older_version(
 ) -> Generator[dict, Any, None]:
     """Filter out bundles built from older versions
 
-    Generally, once a new version is bumped for a task, there should be no new
-    bundle build for the older versions. However, the corner case happened.
-    Refer to STONEBLD-3667.
+    Once a new version is bumped for a task, there should be no new bundle
+    builds for old versions to introduce migrations.
 
     Bundles built for older versions can be ignored because it does not make
     sense to add migrations to an older version as Konflux users should always

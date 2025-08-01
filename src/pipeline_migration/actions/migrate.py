@@ -447,6 +447,10 @@ class LinkedMigrationsResolver(Resolver):
     ) -> Generator[TaskBundleMigration, Any, None]:
         """Resolve migrations by links represented by annotation"""
 
+        if not upgrades_range:
+            logger.info("Upgrade range is empty for %s. Skip resolving migrations.", dep_name)
+            return
+
         manifest_digests = [tag.manifest_digest for tag in upgrades_range]
         i = 0
         while True:

@@ -27,7 +27,7 @@ from pipeline_migration.registry import (
 )
 
 from pipeline_migration.utils import YAMLStyle, load_yaml, dump_yaml
-from tests.actions.test_migrate import APP_IMAGE_REPO, TASK_BUNDLE_CLONE
+from tests.actions.test_migrate import APP_IMAGE_REPO, TASK_BUNDLE_CLONE, TASK_BUNDLE_SIGNATURE_SCAN
 from tests.utils import generate_digest, generate_git_sha
 
 
@@ -170,6 +170,15 @@ task_bundle_clone_test_data = ImageTestData(
 )
 
 
+def mock_quay_list_tags(image_repo: str, tags: list[dict]) -> None:
+    assert image_repo != ""
+    api_url = f"https://quay.io/api/v1/repository/{image_repo}/tag/"
+    responses.get(
+        f"{api_url}?page=1&onlyActiveTags=true",
+        json={"tags": tags, "page": 1, "has_additional": False},
+    )
+
+
 class MockRegistry(Registry):
 
     test_data = [task_bundle_clone_test_data]
@@ -206,7 +215,7 @@ class MockRegistry(Registry):
         raise ValueError("No test data.")
 
 
-class TestMigrateSingleTaskBundleUpgrade:
+class TestMigrateTaskBundleUpgrade:
 
     def _mock_quay_list_tags(self):
         for image_data in MockRegistry.test_data:
@@ -216,11 +225,16 @@ class TestMigrateSingleTaskBundleUpgrade:
                 if manifest_json["config"]["mediaType"] == MEDIA_TYPE_OCI_IMAGE_CONFIG_V1
             ]
             c = Container(image_data.image)
-            api_url = f"https://quay.io/api/v1/repository/{c.api_prefix}/tag/"
-            responses.get(
-                f"{api_url}?page=1&onlyActiveTags=true",
-                json={"tags": tags, "page": 1, "has_additional": False},
-            )
+            mock_quay_list_tags(c.api_prefix, tags)
+
+        # Mock tags that are not in known scheme. It causes empty upgrade range is
+        # detected for the bundle upgrade.
+        c = Container(TASK_BUNDLE_SIGNATURE_SCAN)
+        tags = [
+            {"name": "0.1", "manifest_digest": generate_digest()},
+            {"name": generate_digest().replace(":", "-"), "manifest_digest": generate_digest()},
+        ]
+        mock_quay_list_tags(c.api_prefix, tags)
 
     def _mock_pipeline_file(self, repo_path: Path, content: str) -> Path:
         tekton_dir = repo_path / ".tekton"
@@ -239,7 +253,10 @@ class TestMigrateSingleTaskBundleUpgrade:
         pipeline_yaml_with_various_indent_styles,
         monkeypatch,
         tmp_path,
+        caplog,
     ):
+        caplog.set_level(level=logging.INFO, logger="migrate")
+
         monkeypatch.setattr("pipeline_migration.actions.migrate.Registry", MockRegistry)
         self._mock_quay_list_tags()
 
@@ -279,6 +296,17 @@ class TestMigrateSingleTaskBundleUpgrade:
                 "depTypes": ["tekton-step-image"],
                 "packageFile": "path/to/build-file.yaml",
                 "parentDir": "path/to",
+            },
+            # Empty upgrade range is empty for this bundle upgrade.
+            {
+                "depName": TASK_BUNDLE_SIGNATURE_SCAN,
+                "currentValue": "0.2",
+                "currentDigest": "sha256:ab2fb9ae4e7e",
+                "newValue": "0.2",
+                "newDigest": "sha256:cdbb69a3a08f",
+                "depTypes": ["tekton-bundle"],
+                "packageFile": str(pipeline_file.relative_to(tmp_path)),
+                "parentDir": pipeline_file.parent.name,
             },
         ]
 
@@ -328,6 +356,10 @@ class TestMigrateSingleTaskBundleUpgrade:
         monkeypatch.setattr("subprocess.run", _subprocess_run)
 
         assert entry_point() is None
+
+        if use_linked_migrations:
+            log_text = f"Upgrade range is empty for {TASK_BUNDLE_SIGNATURE_SCAN}."
+            assert log_text in caplog.text
 
         # Verify result formatting
         cur_style = YAMLStyle.detect(pipeline_file)

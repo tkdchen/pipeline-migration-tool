@@ -48,6 +48,7 @@ APP_IMAGE_REPO: Final = "reg.io/ns/app"
 TASK_BUNDLE_CLONE: Final = "quay.io/konflux-ci/catalog/task-clone"
 TASK_BUNDLE_TESTS: Final = "quay.io/konflux-ci/catalog/task-tests"
 TASK_BUNDLE_LINT: Final = "quay.io/konflux-ci/catalog/task-lint"
+TASK_BUNDLE_SIGNATURE_SCAN: Final = "quay.io/konflux-ci/some-catalog/task-signature-scan"
 
 
 class TestDetermineTaskBundleUpdatesRange:
@@ -660,6 +661,37 @@ class TestLinkedMigrationsResolver:
         resolver.resolve([tb_upgrade])
 
         assert len(tb_upgrade.migrations) == expected_migrations_count
+
+    @responses.activate
+    def test_skip_resolving_migrations_if_upgrade_range_is_empty(self, caplog):
+        """Test no upgrade, no migration is resolved"""
+        caplog.set_level(logging.INFO, logger="migrate")
+
+        tb_upgrade = TaskBundleUpgrade(
+            dep_name=APP_IMAGE_REPO,
+            current_value="0.1",
+            current_digest="sha256:bb6de65",
+            new_value="0.2",
+            new_digest="sha256:2a2c2b7",
+        )
+
+        c = Container(tb_upgrade.dep_name)
+        tags = [
+            {"name": "0.3", "manifest_digest": "sha256:bfc0c3c"},
+            {"name": f"sha256-{generate_digest()}", "manifest_digest": "sha256:bfc0c3c"},
+        ]
+        responses.add(
+            responses.GET,
+            f"https://{c.registry}/api/v1/repository/{c.namespace}/{c.repository}/tag/?"
+            "page=1&onlyActiveTags=true",
+            json={"tags": tags, "page": 1, "has_additional": False},
+        )
+
+        resolver = LinkedMigrationsResolver()
+        resolver.resolve([tb_upgrade])
+
+        log_text = f"Upgrade range is empty for {tb_upgrade.dep_name}. Skip resolving migrations"
+        assert log_text in caplog.text
 
 
 @pytest.mark.parametrize(

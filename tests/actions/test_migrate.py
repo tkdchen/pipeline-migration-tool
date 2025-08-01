@@ -787,6 +787,5 @@ class TestLinkedMigrationsResolver:
         ),
     ],
 )
-def test_filter_out_bundles_built_from_older_version(tags_info, stop_at, expected):
-    filter_out = migrate.filter_out_bundles_built_from_older_version
-    assert list(filter_out(tags_info, stop_at)) == expected
+def test_drop_out_of_order_versions(tags_info, stop_at, expected):
+    assert list(migrate.drop_out_of_order_versions(tags_info, stop_at)) == expected

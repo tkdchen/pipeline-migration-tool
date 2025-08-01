@@ -16,7 +16,6 @@ from typing import Final, Any
 from jsonschema.exceptions import ValidationError
 from jsonschema.validators import Draft202012Validator
 from packaging.version import parse as parse_version
-from packaging.version import Version
 
 from pipeline_migration.pipeline import PipelineFileOperation
 from pipeline_migration.quay import QuayTagInfo, list_active_repo_tags
@@ -110,17 +109,23 @@ def only_tags_pinned_by_version_revision(tags_info: Iterable[dict]) -> Generator
             yield tag_info
 
 
-def filter_out_bundles_built_from_older_version(
-    tags_info: Iterable[dict], stop_at_digest: str
-) -> Generator[dict, Any, None]:
-    """Filter out bundles built from older versions
+def drop_out_of_order_versions(tags_info: Iterable[dict], stop_at_digest: str) -> Iterable[dict]:
+    """Drop version tags that are out of order.
 
-    Once a new version is bumped for a task, there should be no new bundle
-    builds for old versions to introduce migrations.
+    Once a new version is bumped for a task, there should be no reason to attach
+    migrations to the older version of the task. That means we can ignore "out of order"
+    versions.
 
-    Bundles built for older versions can be ignored because it does not make
-    sense to add migrations to an older version as Konflux users should always
-    follow the newer versions.
+    For example, if we have these tags (ordered from newest to oldest by creation date):
+
+        ["0.3-b", "0.2-b", "0.3-a", "0.1-b", "0.2-a", "0.1-a"]
+
+    Then we only want to look at these:
+
+        ["0.3-b", "0.3-a", "0.2-a", "0.1-a"]
+
+    Because 0.2-b and 0.1-b are out of order - when they were created, a newer version
+    tag already existed.
 
     :param tags_info: tags information responded by Quay.io listRepoTags endpoint.
         Each tag mapping must have a tag name pinned by version and revision, for
@@ -128,37 +133,25 @@ def filter_out_bundles_built_from_older_version(
     :param stop_at_digest: str, stop iterating tags at the one with this digest.
         Empty string causes iterating through all tags.
     """
-    # Buffer parsed version for less parse_version calls
-    buffer: list[tuple[Version, dict]] = []
-
-    def _remove_smaller_versions(for_version: Version) -> None:
-        """Remove all smaller versions from the buffer in place"""
-        i = len(buffer) - 1
-        while True:
-            version, _ = buffer[i]
-            if version < for_version:
-                buffer.pop(i)
-            else:
-                break
-            i -= 1
-            if i < 0:
-                break
-
-    for cur_tag in tags_info:
-        cur_version = cur_tag["name"].split("-")[0]
-        parsed_cur_version = parse_version(cur_version)
-        if not buffer:
-            buffer.append((parsed_cur_version, cur_tag))
-            continue
-        last_parsed_version, _ = buffer[-1]
-        if last_parsed_version < parse_version(cur_version):
-            _remove_smaller_versions(parsed_cur_version)
-        buffer.append((parsed_cur_version, cur_tag))
-        if cur_tag["manifest_digest"] == stop_at_digest:
+    relevant_tags = []
+    for tag in tags_info:
+        relevant_tags.append(tag)
+        if tag["manifest_digest"] == stop_at_digest:
             break
 
-    for _, tag_info in buffer:
-        yield tag_info
+    tags_that_follow_correct_version_order = []
+    highest_version_so_far = None
+
+    # Iterate through the tags from oldest to newest, drop versions that are out of order
+    for tag in reversed(relevant_tags):
+        version = parse_version(tag["name"].split("-")[0])
+
+        if highest_version_so_far is None or version >= highest_version_so_far:
+            tags_that_follow_correct_version_order.append(tag)
+            highest_version_so_far = version
+
+    # Return the result in the same order as the input data (newest to oldest)
+    return reversed(tags_that_follow_correct_version_order)
 
 
 # TODO: cache this as well?
@@ -182,7 +175,7 @@ def determine_task_bundle_upgrades_range(
     new_bundle = task_bundle_upgrade.new_bundle
 
     c = Container(task_bundle_upgrade.dep_name)
-    tags_info = filter_out_bundles_built_from_older_version(
+    tags_info = drop_out_of_order_versions(
         only_tags_pinned_by_version_revision(list_active_repo_tags(c)),
         task_bundle_upgrade.current_digest,
     )

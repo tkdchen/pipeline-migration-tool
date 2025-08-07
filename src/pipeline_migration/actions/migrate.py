@@ -2,6 +2,7 @@ import argparse
 import json
 import logging
 import os.path
+import operator
 import re
 import subprocess as sp
 import tempfile
@@ -15,7 +16,7 @@ from typing import Final, Any
 
 from jsonschema.exceptions import ValidationError
 from jsonschema.validators import Draft202012Validator
-from packaging.version import parse as parse_version
+from packaging.version import Version, parse as parse_version
 
 from pipeline_migration.pipeline import PipelineFileOperation
 from pipeline_migration.quay import QuayTagInfo, list_active_repo_tags
@@ -109,7 +110,43 @@ def only_tags_pinned_by_version_revision(tags_info: Iterable[dict]) -> Generator
             yield tag_info
 
 
-def drop_out_of_order_versions(tags_info: Iterable[dict], stop_at_digest: str) -> Iterable[dict]:
+def expand_versions(from_: str, to: str) -> list[str]:
+    """Expand versions
+
+    Example:
+
+        from 0.2 to 0.2 => ["0.2"]
+        from 0.2 to 0.3 => ["0.2", "0.3"]
+        from 0.2 to 0.5 => ["0.2", "0.3", "0.4", "0.5"]
+
+    This expansion only works with the version management based on the minor version.
+    """
+    from_version = parse_version(from_)
+    to_version = parse_version(to)
+    if from_version > to_version:
+        raise ValueError(f"From version {from_} is greater than the to version {to}.")
+    return [f"0.{minor}" for minor in range(int(from_version.minor), int(to_version.minor) + 1)]
+
+
+def list_bundle_tags(bundle_upgrade: TaskBundleUpgrade) -> list[dict]:
+    versions = expand_versions(bundle_upgrade.current_value, bundle_upgrade.new_value)
+    tags: list[dict] = []
+    c = Container(bundle_upgrade.dep_name)
+    for version in versions:
+        iter_tags = list_active_repo_tags(c, tag_name_pattern=f"{version}-")
+        try:
+            first_tag = next(iter_tags)
+        except StopIteration:
+            logger.info("No tag is queried from registry for version %s", version)
+            continue
+        tags.append(first_tag)
+        tags.extend(iter_tags)
+    return sorted(tags, key=operator.itemgetter("start_ts"), reverse=True)
+
+
+def drop_out_of_order_versions(
+    tags_info: Iterable[dict], bundle_upgrade: TaskBundleUpgrade
+) -> tuple[list[dict], dict | None, dict | None, bool]:
     """Drop version tags that are out of order.
 
     Once a new version is bumped for a task, there should be no reason to attach
@@ -130,75 +167,130 @@ def drop_out_of_order_versions(tags_info: Iterable[dict], stop_at_digest: str) -
     :param tags_info: tags information responded by Quay.io listRepoTags endpoint.
         Each tag mapping must have a tag name pinned by version and revision, for
         example, ``0.2-<commit hash>``.
-    :param stop_at_digest: str, stop iterating tags at the one with this digest.
-        Empty string causes iterating through all tags.
+    :param bundle_upgrade: a ``TaskBundleUpgrade`` instance assisting on getting more information
+        from the tags.
+    :type bundle_upgrade: TaskBundleUpgrade
+    :return: a 4-elements tuple. The first one is a list of tags cleaned up by dropping the
+        out-of-order bundles. If input ``tags_info`` is empty, the result will be empty too. The
+        second one references the current tag. The third one references the new tag. The last one
+        indicates whether the current tag is out-of-order.
     """
-    relevant_tags = []
-    for tag in tags_info:
-        relevant_tags.append(tag)
-        if tag["manifest_digest"] == stop_at_digest:
-            break
-
     tags_that_follow_correct_version_order = []
-    highest_version_so_far = None
+    highest_version_so_far: Version | None = None
+    is_out_of_order = False
 
-    # Iterate through the tags from oldest to newest, drop versions that are out of order
-    for tag in reversed(relevant_tags):
-        version = parse_version(tag["name"].split("-")[0])
+    current_tag_info = None
+    new_tag_info = None
+    current_digest = bundle_upgrade.current_digest
+    new_digest = bundle_upgrade.new_digest
 
+    def _parse_version(tag_name: str) -> Version:
+        return parse_version(tag_name.split("-")[0])
+
+    for tag in reversed(list(tags_info)):
+        if current_tag_info is None and tag["manifest_digest"] == current_digest:
+            current_tag_info = tag
+            if highest_version_so_far and _parse_version(tag["name"]) < highest_version_so_far:
+                is_out_of_order = True
+        elif new_tag_info is None and tag["manifest_digest"] == new_digest:
+            new_tag_info = tag
+        version = _parse_version(tag["name"])
         if highest_version_so_far is None or version >= highest_version_so_far:
             tags_that_follow_correct_version_order.append(tag)
             highest_version_so_far = version
 
-    # Return the result in the same order as the input data (newest to oldest)
-    return reversed(tags_that_follow_correct_version_order)
+    sort_key = operator.itemgetter("start_ts")
+    tags_that_follow_correct_version_order.sort(key=sort_key, reverse=True)
+    return tags_that_follow_correct_version_order, current_tag_info, new_tag_info, is_out_of_order
 
 
 # TODO: cache this as well?
 def determine_task_bundle_upgrades_range(
     task_bundle_upgrade: TaskBundleUpgrade,
 ) -> list[QuayTagInfo]:
-    """Determine task bundles range between given two task bundles
+    """Determine upgrade range for a given bundle upgrade
 
-    The determined range consists of task bundles [new task bundle ... current task bundle].
+    The upgrade range is a collection of tags pointing from the new bundle to the previous one of
+    current bundle. This method handles several senariors against the tag scheme:
 
-    Each element inside the upgrades range is the raw tag information mapping
-    responded from Quay.io registry, and the range is in the same order as the tags responded
-    (newest to oldest).
+    * This method aims to work well with the tag scheme pushed by build-definitions CI pipeline.
+      The expected tag form is ``<version>-<commit hash>``.
+    * Ideally, the bundles should be built linearly version by version. However, out-of-order
+      bundles started to present in bundle repositories, for example, old version task is built
+      because of deprecation.
+    * Transitioning to decentralized build-definitions. Some tasks have been decentralized and
+      already have new tag scheme in their image repositories. Part of the repositories have single
+      tag scheme, whereas others mixes two.
+
+      The pure new tag scheme looks like (from newest to oldest):
+
+        3.0
+        sha256-123456
+        sha256-345678
+
+      Similarly, the mixed tag schemes looks like:
+
+        3.0
+        sha256-123456
+        sha256-345678
+        0.2
+        0.2-revision_1
+        0.2-revision_2
+
+    As of writing this docstring, upgrade range is still determined based on the original tag scheme
+    made by build-definitions CI pipeline, and this method tries best to not fail when possibly
+    encounter the new tag scheme. For detailed information of the result range, refer to the below
+    description.
+
+    IMPORTANT: current implementation is not intended as a solution for addressing the decentralized
+    task bundles.
+
+    :param task_bundle_upgrade: a ``TaskBundleUpgrade`` instance providing upgrade information for
+        the determination.
+    :type task_bundle_upgrade: TaskBundleUpgrade
+    :return: a list of ``QuayTagInfo`` instances representing the upgrade range. The current bundle
+        is not included in the result range. Empty list is returned if either tag pointing to the
+        current bundle or the one point to the new bundle is not retrieved from registry. Once it
+        happens, it could either mean the input upgrade data is invalid or the new tag scheme is
+        encountered.
+    :rtype: list[QuayTagInfo]
     """
-
-    r: list[QuayTagInfo] = []
-    in_range = False
-    has_tag = False
-
-    current_bundle = task_bundle_upgrade.current_bundle
-    new_bundle = task_bundle_upgrade.new_bundle
-
-    c = Container(task_bundle_upgrade.dep_name)
-    tags_info = drop_out_of_order_versions(
-        only_tags_pinned_by_version_revision(list_active_repo_tags(c)),
-        task_bundle_upgrade.current_digest,
+    result = drop_out_of_order_versions(
+        only_tags_pinned_by_version_revision(list_bundle_tags(task_bundle_upgrade)),
+        task_bundle_upgrade,
     )
-    for tag in tags_info:
-        quay_tag = QuayTagInfo(name=tag["name"], manifest_digest=tag["manifest_digest"])
-        has_tag = True
-        if quay_tag.manifest_digest == task_bundle_upgrade.new_digest:
-            r.append(quay_tag)
-            in_range = True
-        elif quay_tag.manifest_digest == task_bundle_upgrade.current_digest:
-            if not in_range:
-                raise ValueError(f"New task bundle {new_bundle} has not been present.")
-            return r
-        elif in_range:
-            r.append(quay_tag)
+    tags_info, current_tag_info, new_tag_info, is_out_of_order = result
 
-    if not has_tag:
-        return r
+    current_bundle_ref: Final = task_bundle_upgrade.current_bundle
+    new_bundle_ref: Final = task_bundle_upgrade.new_bundle
 
-    raise ValueError(
-        f"Neither old task bundle {current_bundle} nor newer task bundle {new_bundle}"
-        " is present in the registry."
-    )
+    if current_tag_info is None:
+        logger.warning("Registry does not have current bundle %s", current_bundle_ref)
+        return []
+
+    if new_tag_info is None:
+        logger.warning("Registry does not have new bundle %s", new_bundle_ref)
+        return []
+
+    current_pos = new_pos = -1
+    current_digest = task_bundle_upgrade.current_digest
+    new_digest = task_bundle_upgrade.new_digest
+    for i, tag in enumerate(tags_info):
+        this_digest = tag["manifest_digest"]
+        if this_digest == new_digest:
+            new_pos = i
+        elif this_digest == current_digest:
+            current_pos = i
+
+    if is_out_of_order:
+        # This current bundle has been filtered out previously
+        logger.info(
+            "Current bundle %s is newer than new bundle %s", current_bundle_ref, new_bundle_ref
+        )
+        the_range = tags_info[new_pos:]
+    else:
+        the_range = tags_info[new_pos:current_pos]
+    return [QuayTagInfo.from_tag_info(item) for item in the_range]
 
 
 class MigrationFileOperation(PipelineFileOperation):

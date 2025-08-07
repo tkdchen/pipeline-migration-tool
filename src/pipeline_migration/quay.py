@@ -11,9 +11,20 @@ from pipeline_migration.registry import Container
 class QuayTagInfo:
     name: str
     manifest_digest: str
+    start_ts: int
+
+    @classmethod
+    def from_tag_info(cls, tag_info: dict) -> "QuayTagInfo":
+        return cls(
+            name=tag_info["name"],
+            manifest_digest=tag_info["manifest_digest"],
+            start_ts=tag_info["start_ts"],
+        )
 
 
-def list_active_repo_tags(c: Container, tag_name: str = "") -> Generator[dict, Any, None]:
+def list_active_repo_tags(
+    c: Container, tag_name: str = "", tag_name_pattern: str = ""
+) -> Generator[dict, Any, None]:
     """List repository tags
 
     Make GET HTTP request to Quay API ``listRepoTags``.
@@ -26,6 +37,8 @@ def list_active_repo_tags(c: Container, tag_name: str = "") -> Generator[dict, A
         params = {"page": str(page), "onlyActiveTags": "true"}
         if tag_name:
             params["specificTag"] = tag_name
+        if tag_name_pattern:
+            params["filter_tag_name"] = f"like:{tag_name_pattern}"
         api_url = f"https://{c.registry}/api/v1/repository/{c.namespace}/{c.repository}/tag/"
         resp = requests.get(api_url, params=params)
         resp.raise_for_status()
@@ -39,6 +52,6 @@ def list_active_repo_tags(c: Container, tag_name: str = "") -> Generator[dict, A
 
 def get_active_tag(c: Container, name: str) -> dict | None:
     try:
-        return next(list_active_repo_tags(c, name))
+        return next(list_active_repo_tags(c, tag_name=name))
     except StopIteration:
         return None

@@ -1,3 +1,4 @@
+import itertools
 import json
 import logging
 import subprocess
@@ -27,7 +28,12 @@ from pipeline_migration.registry import (
 )
 
 from pipeline_migration.utils import YAMLStyle, load_yaml, dump_yaml
-from tests.actions.test_migrate import APP_IMAGE_REPO, TASK_BUNDLE_CLONE, TASK_BUNDLE_SIGNATURE_SCAN
+from tests.actions.test_migrate import (
+    APP_IMAGE_REPO,
+    TASK_BUNDLE_CLONE,
+    TASK_BUNDLE_SIGNATURE_SCAN,
+    mock_list_repo_tags_with_filter_tag_name,
+)
 from tests.utils import generate_digest, generate_git_sha
 
 
@@ -170,6 +176,7 @@ task_bundle_clone_test_data = ImageTestData(
 )
 
 
+# TODO: make this fixture to be reusable
 def mock_quay_list_tags(image_repo: str, tags: list[dict]) -> None:
     assert image_repo != ""
     api_url = f"https://quay.io/api/v1/repository/{image_repo}/tag/"
@@ -218,23 +225,27 @@ class MockRegistry(Registry):
 class TestMigrateTaskBundleUpgrade:
 
     def _mock_quay_list_tags(self):
+
         for image_data in MockRegistry.test_data:
+            timestamp_gen = itertools.count(len(image_data.manifests), -1)
             tags = [
-                {"name": f"0.1-{generate_git_sha()}", "manifest_digest": digest}
+                {
+                    "name": f"0.1-{generate_git_sha()}",
+                    "manifest_digest": digest,
+                    "start_ts": next(timestamp_gen),
+                }
                 for digest, manifest_json in image_data.manifests.items()
                 if manifest_json["config"]["mediaType"] == MEDIA_TYPE_OCI_IMAGE_CONFIG_V1
             ]
-            c = Container(image_data.image)
-            mock_quay_list_tags(c.api_prefix, tags)
+            # c = Container(image_data.image)
+            # mock_quay_list_tags(c.api_prefix, tags)
 
-        # Mock tags that are not in known scheme. It causes empty upgrade range is
-        # detected for the bundle upgrade.
-        c = Container(TASK_BUNDLE_SIGNATURE_SCAN)
-        tags = [
-            {"name": "0.1", "manifest_digest": generate_digest()},
-            {"name": generate_digest().replace(":", "-"), "manifest_digest": generate_digest()},
-        ]
-        mock_quay_list_tags(c.api_prefix, tags)
+            mock_list_repo_tags_with_filter_tag_name(image_data.image, tags)
+
+        # Mock new tag scheme in bundle image repository, so no tag is retrieved for the version.
+        mock_list_repo_tags_with_filter_tag_name(
+            TASK_BUNDLE_SIGNATURE_SCAN, [], empty_for_versions=["0.2"]
+        )
 
     def _mock_pipeline_file(self, repo_path: Path, content: str) -> Path:
         tekton_dir = repo_path / ".tekton"

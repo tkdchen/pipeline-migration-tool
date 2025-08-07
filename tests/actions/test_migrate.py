@@ -1,3 +1,4 @@
+from collections import defaultdict
 import os
 import itertools
 import logging
@@ -546,6 +547,10 @@ class TestMigrationFileOperationHandlePipelineFile:
         assert "something is wrong" in caplog.text
 
 
+def mock_list_repo_tags_by_grouping_tags(tags_info: list[dict]):
+    pass  # TODO
+
+
 class TestLinkedMigrationsResolver:
 
     @responses.activate
@@ -694,130 +699,257 @@ class TestLinkedMigrationsResolver:
         assert log_text in caplog.text
 
 
+@responses.activate
 @pytest.mark.parametrize(
-    "tags_info,stop_at,expected",
+    "tags_info,bundle_upgrade,expected",
     [
-        pytest.param([], "", [], id="empty-input-tags"),
         pytest.param(
-            [{"name": "0.2-2834", "manifest_digest": "sha256@1234"}],
-            "",
-            [{"name": "0.2-2834", "manifest_digest": "sha256@1234"}],
+            [],
+            TaskBundleUpgrade(
+                dep_name=TASK_BUNDLE_CLONE,
+                current_value="0.2",
+                current_digest="sha256:4745",
+                new_value="0.2",
+                new_digest="sha256:6582",
+            ),
+            [],
+            id="empty-input-tags",
+        ),
+        pytest.param(
+            [{"name": "0.2-2834", "manifest_digest": "sha256:2834", "start_ts": 1}],
+            TaskBundleUpgrade(
+                dep_name=TASK_BUNDLE_CLONE,
+                current_value="0.2",
+                current_digest="sha256:def7",
+                new_value="0.2",
+                new_digest="sha256:2834",
+            ),
+            [{"name": "0.2-2834", "manifest_digest": "sha256:2834", "start_ts": 1}],
             id="single-tag",
         ),
         pytest.param(
-            [
-                {"name": "0.2-2834", "manifest_digest": "sha256@1234"},
-                {"name": "0.2-4745", "manifest_digest": "sha256@4745"},
-            ],
-            "",
-            [
-                {"name": "0.2-2834", "manifest_digest": "sha256@1234"},
-                {"name": "0.2-4745", "manifest_digest": "sha256@4745"},
-            ],
-            id="two-tags-within-same-version",
+            [{"name": "0.2-2834", "manifest_digest": "sha256:2834", "start_ts": 1}],
+            TaskBundleUpgrade(
+                dep_name=TASK_BUNDLE_CLONE,
+                current_value="0.2",
+                current_digest="sha256:2834",
+                new_value="0.2",
+                new_digest="sha256:def7",
+            ),
+            [],
+            id="single-tag-2",
         ),
         pytest.param(
             [
-                {"name": "0.2-2834", "manifest_digest": "sha256@2834"},
-                {"name": "0.2-4745", "manifest_digest": "sha256@4745"},
-                {"name": "0.2-1028", "manifest_digest": "sha256@1028"},
-                {"name": "0.2-6582", "manifest_digest": "sha256@6582"},
+                {"name": "0.2-2834", "manifest_digest": "sha256:2834", "start_ts": 1},
+                {"name": "0.2-4745", "manifest_digest": "sha256:4745", "start_ts": 2},  # <- to
+                {"name": "0.2-1028", "manifest_digest": "sha256:1028", "start_ts": 3},
+                {"name": "0.2-6582", "manifest_digest": "sha256:6582", "start_ts": 4},  # <- from
             ],
-            "",
+            TaskBundleUpgrade(
+                dep_name=TASK_BUNDLE_CLONE,
+                current_value="0.2",
+                current_digest="sha256:6582",
+                new_value="0.2",
+                new_digest="sha256:4745",
+            ),
             [
-                {"name": "0.2-2834", "manifest_digest": "sha256@2834"},
-                {"name": "0.2-4745", "manifest_digest": "sha256@4745"},
-                {"name": "0.2-1028", "manifest_digest": "sha256@1028"},
-                {"name": "0.2-6582", "manifest_digest": "sha256@6582"},
+                {"name": "0.2-4745", "manifest_digest": "sha256:4745", "start_ts": 2},
+                {"name": "0.2-1028", "manifest_digest": "sha256:1028", "start_ts": 3},
+                {"name": "0.2-6582", "manifest_digest": "sha256:6582", "start_ts": 4},
             ],
             id="more-tags-within-version",
         ),
         pytest.param(
             [
-                {"name": "0.3-2834", "manifest_digest": "sha256@2834"},
-                {"name": "0.2-4745", "manifest_digest": "sha256@4745"},
+                {"name": "0.3-2834", "manifest_digest": "sha256:2834", "start_ts": 1},
+                {"name": "0.2-4745", "manifest_digest": "sha256:4745", "start_ts": 2},
             ],
-            "",
+            TaskBundleUpgrade(
+                dep_name=TASK_BUNDLE_CLONE,
+                current_value="0.2",
+                current_digest="sha256:4745",
+                new_value="0.3",
+                new_digest="sha256:2834",
+            ),
             [
-                {"name": "0.3-2834", "manifest_digest": "sha256@2834"},
-                {"name": "0.2-4745", "manifest_digest": "sha256@4745"},
+                {"name": "0.3-2834", "manifest_digest": "sha256:2834", "start_ts": 1},
+                {"name": "0.2-4745", "manifest_digest": "sha256:4745", "start_ts": 2},
             ],
             id="two-tags-newer-version-is-built",
         ),
         pytest.param(
             [
-                {"name": "0.2-4745", "manifest_digest": "sha256@4745"},
-                {"name": "0.3-2834", "manifest_digest": "sha256@2834"},
+                {"name": "0.2-4745", "manifest_digest": "sha256:4745", "start_ts": 1},
+                {"name": "0.3-2834", "manifest_digest": "sha256:2834", "start_ts": 2},
             ],
-            "",
-            [{"name": "0.3-2834", "manifest_digest": "sha256@2834"}],
+            TaskBundleUpgrade(
+                dep_name=TASK_BUNDLE_CLONE,
+                current_value="0.2",
+                current_digest="sha256:4745",
+                new_value="0.3",
+                new_digest="sha256:2834",
+            ),
+            [{"name": "0.3-2834", "manifest_digest": "sha256:2834", "start_ts": 2}],
             id="two-tags-older-version-is-built",
         ),
         pytest.param(
             [
-                {"name": "0.2-abcd", "manifest_digest": "sha256@abcd"},
-                {"name": "0.3-0de3", "manifest_digest": "sha256@0de3"},
-                {"name": "0.2-4745", "manifest_digest": "sha256@4745"},
-                {"name": "0.3-6532", "manifest_digest": "sha256@6532"},
-                {"name": "0.3-2834", "manifest_digest": "sha256@2834"},
-                {"name": "0.2-e8f2", "manifest_digest": "sha256@e8f2"},
+                {"name": "0.2-abcd", "manifest_digest": "sha256:abcd", "start_ts": 1},
+                {"name": "0.3-0de3", "manifest_digest": "sha256:0de3", "start_ts": 2},
+                {"name": "0.2-4745", "manifest_digest": "sha256:4745", "start_ts": 3},  # <- from
+                {"name": "0.3-6532", "manifest_digest": "sha256:6532", "start_ts": 4},  # <- to
+                {"name": "0.3-2834", "manifest_digest": "sha256:2834", "start_ts": 5},
+                {"name": "0.2-e8f2", "manifest_digest": "sha256:e8f2", "start_ts": 6},
             ],
-            "",
+            TaskBundleUpgrade(
+                dep_name=TASK_BUNDLE_CLONE,
+                current_value="0.2",
+                current_digest="sha256:4745",
+                new_value="0.3",
+                new_digest="sha256:6532",
+            ),
             [
-                {"name": "0.3-0de3", "manifest_digest": "sha256@0de3"},
-                {"name": "0.3-6532", "manifest_digest": "sha256@6532"},
-                {"name": "0.3-2834", "manifest_digest": "sha256@2834"},
-                {"name": "0.2-e8f2", "manifest_digest": "sha256@e8f2"},
+                {"name": "0.3-6532", "manifest_digest": "sha256:6532", "start_ts": 4},
+                {"name": "0.3-2834", "manifest_digest": "sha256:2834", "start_ts": 5},
+                {"name": "0.2-e8f2", "manifest_digest": "sha256:e8f2", "start_ts": 6},
             ],
             id="tags-with-mixed-versions",
         ),
         pytest.param(
             [
-                {"name": "0.3-fed0", "manifest_digest": "sha256@fed0"},
-                {"name": "0.4-def4", "manifest_digest": "sha256@def4"},
-                {"name": "0.2-8a2d", "manifest_digest": "sha256@8a2d"},
-                {"name": "0.1-e37f", "manifest_digest": "sha256@e37f"},
-                {"name": "0.2-abcd", "manifest_digest": "sha256@abcd"},
-                {"name": "0.3-0de3", "manifest_digest": "sha256@0de3"},
-                {"name": "0.2-4745", "manifest_digest": "sha256@4745"},
-                {"name": "0.1-f40f", "manifest_digest": "sha256@f40f"},
-                {"name": "0.2-9fed", "manifest_digest": "sha256@9fed"},
-                {"name": "0.3-6532", "manifest_digest": "sha256@6532"},
-                {"name": "0.3-2834", "manifest_digest": "sha256@2834"},
-                {"name": "0.2-e8f2", "manifest_digest": "sha256@e8f2"},
+                {"name": "0.3-fed0", "manifest_digest": "sha256:fed0", "start_ts": 1},
+                {"name": "0.4-def4", "manifest_digest": "sha256:def4", "start_ts": 2},  # <- to
+                {"name": "0.2-8a2d", "manifest_digest": "sha256:8a2d", "start_ts": 3},
+                {"name": "0.1-e37f", "manifest_digest": "sha256:e37f", "start_ts": 4},
+                {"name": "0.2-abcd", "manifest_digest": "sha256:abcd", "start_ts": 5},
+                {"name": "0.3-0de3", "manifest_digest": "sha256:0de3", "start_ts": 6},
+                {"name": "0.2-4745", "manifest_digest": "sha256:4745", "start_ts": 7},
+                {"name": "0.1-f40f", "manifest_digest": "sha256:f40f", "start_ts": 8},
+                {"name": "0.2-9fed", "manifest_digest": "sha256:9fed", "start_ts": 9},
+                {"name": "0.3-6532", "manifest_digest": "sha256:6532", "start_ts": 10},
+                {"name": "0.3-2834", "manifest_digest": "sha256:2834", "start_ts": 11},
+                {"name": "0.2-e8f2", "manifest_digest": "sha256:e8f2", "start_ts": 12},  # <- from
             ],
-            "",
+            TaskBundleUpgrade(
+                dep_name=TASK_BUNDLE_CLONE,
+                current_value="0.2",
+                current_digest="sha256:e8f2",
+                new_value="0.4",
+                new_digest="sha256:def4",
+            ),
             [
-                {"name": "0.4-def4", "manifest_digest": "sha256@def4"},
-                {"name": "0.3-0de3", "manifest_digest": "sha256@0de3"},
-                {"name": "0.3-6532", "manifest_digest": "sha256@6532"},
-                {"name": "0.3-2834", "manifest_digest": "sha256@2834"},
-                {"name": "0.2-e8f2", "manifest_digest": "sha256@e8f2"},
+                {"name": "0.4-def4", "manifest_digest": "sha256:def4", "start_ts": 2},
+                {"name": "0.3-0de3", "manifest_digest": "sha256:0de3", "start_ts": 6},
+                {"name": "0.3-6532", "manifest_digest": "sha256:6532", "start_ts": 10},
+                {"name": "0.3-2834", "manifest_digest": "sha256:2834", "start_ts": 11},
+                {"name": "0.2-e8f2", "manifest_digest": "sha256:e8f2", "start_ts": 12},
             ],
             id="tags-more-older-versions-are-built",
         ),
         pytest.param(
             [
-                {"name": "0.2-8a2d", "manifest_digest": "sha256@8a2d"},
-                {"name": "0.1-e37f", "manifest_digest": "sha256@e37f"},
-                {"name": "0.2-abcd", "manifest_digest": "sha256@abcd"},
-                {"name": "0.3-0de3", "manifest_digest": "sha256@0de3"},
-                {"name": "0.2-4745", "manifest_digest": "sha256@4745"},
-                {"name": "0.1-f40f", "manifest_digest": "sha256@f40f"},
-                {"name": "0.2-9fed", "manifest_digest": "sha256@9fed"},
-                {"name": "0.3-6532", "manifest_digest": "sha256@6532"},
-                {"name": "0.3-2834", "manifest_digest": "sha256@2834"},
-                {"name": "0.2-e8f2", "manifest_digest": "sha256@e8f2"},
+                {"name": "0.2-8a2d", "manifest_digest": "sha256:8a2d", "start_ts": 1},
+                {"name": "0.1-e37f", "manifest_digest": "sha256:e37f", "start_ts": 2},
+                {"name": "0.2-abcd", "manifest_digest": "sha256:abcd", "start_ts": 3},
+                {"name": "0.3-0de3", "manifest_digest": "sha256:0de3", "start_ts": 4},  # <- to
+                {"name": "0.2-4745", "manifest_digest": "sha256:4745", "start_ts": 5},  # <- from
+                {"name": "0.1-f40f", "manifest_digest": "sha256:f40f", "start_ts": 6},
+                {"name": "0.2-9fed", "manifest_digest": "sha256:9fed", "start_ts": 7},
+                {"name": "0.3-6532", "manifest_digest": "sha256:6532", "start_ts": 8},
+                {"name": "0.3-2834", "manifest_digest": "sha256:2834", "start_ts": 9},
+                {"name": "0.2-e8f2", "manifest_digest": "sha256:e8f2", "start_ts": 10},
             ],
-            "sha256@2834",
+            TaskBundleUpgrade(
+                dep_name=TASK_BUNDLE_CLONE,
+                current_value="0.2",
+                current_digest="sha256:4745",
+                new_value="0.3",
+                new_digest="sha256:0de3",
+            ),
             [
-                {"name": "0.3-0de3", "manifest_digest": "sha256@0de3"},
-                {"name": "0.3-6532", "manifest_digest": "sha256@6532"},
-                {"name": "0.3-2834", "manifest_digest": "sha256@2834"},
+                {"name": "0.3-0de3", "start_ts": 4, "manifest_digest": "sha256:0de3"},
+                {"name": "0.3-6532", "start_ts": 8, "manifest_digest": "sha256:6532"},
+                {"name": "0.3-2834", "start_ts": 9, "manifest_digest": "sha256:2834"},
+                {"name": "0.2-e8f2", "start_ts": 10, "manifest_digest": "sha256:e8f2"},
             ],
-            id="tags-stop-earlier",
+            id="upgrade-from-bundle-of-old-version-built-after-newer-version",
+        ),
+        pytest.param(
+            [
+                {"name": "0.2-8a2d", "manifest_digest": "sha256:8a2d", "start_ts": 1},  # <- from
+                {"name": "0.1-e37f", "manifest_digest": "sha256:e37f", "start_ts": 2},
+                {"name": "0.2-abcd", "manifest_digest": "sha256:abcd", "start_ts": 3},
+                {"name": "0.3-0de3", "manifest_digest": "sha256:0de3", "start_ts": 4},  # <- to
+                {"name": "0.2-4745", "manifest_digest": "sha256:4745", "start_ts": 5},
+                {"name": "0.1-f40f", "manifest_digest": "sha256:f40f", "start_ts": 6},
+                {"name": "0.2-9fed", "manifest_digest": "sha256:9fed", "start_ts": 7},
+                {"name": "0.3-6532", "manifest_digest": "sha256:6532", "start_ts": 8},
+                {"name": "0.3-2834", "manifest_digest": "sha256:2834", "start_ts": 9},
+                {"name": "0.2-e8f2", "manifest_digest": "sha256:e8f2", "start_ts": 10},
+            ],
+            TaskBundleUpgrade(
+                dep_name=TASK_BUNDLE_CLONE,
+                current_value="0.2",
+                current_digest="sha256:8a2d",
+                new_value="0.3",
+                new_digest="sha256:0de3",
+            ),
+            [
+                {"name": "0.3-0de3", "start_ts": 4, "manifest_digest": "sha256:0de3"},
+                {"name": "0.3-6532", "start_ts": 8, "manifest_digest": "sha256:6532"},
+                {"name": "0.3-2834", "start_ts": 9, "manifest_digest": "sha256:2834"},
+                {"name": "0.2-e8f2", "start_ts": 10, "manifest_digest": "sha256:e8f2"},
+            ],
+            id="upgrade-from-bundle-of-old-version-built-after-newer-version-2",
+        ),
+        pytest.param(
+            [
+                {"name": "0.2-abcd", "manifest_digest": "sha256:abcd", "start_ts": 1},
+                {"name": "0.3-0de3", "manifest_digest": "sha256:0de3", "start_ts": 2},
+                {"name": "0.2-4745", "manifest_digest": "sha256:4745", "start_ts": 3},
+                {"name": "0.3-6532", "manifest_digest": "sha256:6532", "start_ts": 4},
+                {"name": "0.3-2834", "manifest_digest": "sha256:2834", "start_ts": 5},
+                {"name": "0.2-e8f2", "manifest_digest": "sha256:e8f2", "start_ts": 6},
+            ],
+            # Both of the digests are not present in the responded tags
+            TaskBundleUpgrade(
+                dep_name=TASK_BUNDLE_CLONE,
+                current_value="0.2",
+                current_digest="sha256:9999",
+                new_value="0.3",
+                new_digest="sha256:0000",
+            ),
+            [],
+            id="digest-is-out-of-range",
         ),
     ],
 )
-def test_drop_out_of_order_versions(tags_info, stop_at, expected):
-    assert list(migrate.drop_out_of_order_versions(tags_info, stop_at)) == expected
+def test_drop_out_of_order_versions(tags_info, bundle_upgrade, expected):
+    c = Container(bundle_upgrade.dep_name)
+    api_url = f"https://quay.io/api/v1/repository/{c.api_prefix}/tag/"
+
+    if tags_info:
+        tag_groups: dict[str, list[dict]] = defaultdict(list)
+        for tag in tags_info:
+            version = tag["name"].split("-")[0]
+            tag_groups[version].append(tag)
+        for version, tags_info in tag_groups.items():
+            responses.get(
+                f"{api_url}?page=1&onlyActiveTags=true&filter_tag_name=like:{version}-",
+                json={"tags": tags_info, "page": 1, "has_additional": False},
+            )
+    else:
+        for version in [bundle_upgrade.current_value, bundle_upgrade.new_value]:
+            responses.get(
+                f"{api_url}?page=1&onlyActiveTags=true&filter_tag_name=like:{version}-",
+                json={"tags": [], "page": 1, "has_additional": False},
+            )
+
+    responses.get(
+        f"{api_url}?page=1&onlyActiveTags=true&filter_tag_name=like:0.100-",
+        json={"tags": [], "page": 1, "has_additional": False},
+    )
+
+    tags = migrate.list_bundle_tags(bundle_upgrade)
+    assert list(migrate.drop_out_of_order_versions(tags, bundle_upgrade)) == expected

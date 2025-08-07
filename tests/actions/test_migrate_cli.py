@@ -170,6 +170,7 @@ task_bundle_clone_test_data = ImageTestData(
 )
 
 
+# TODO: make this fixture to be reusable
 def mock_quay_list_tags(image_repo: str, tags: list[dict]) -> None:
     assert image_repo != ""
     api_url = f"https://quay.io/api/v1/repository/{image_repo}/tag/"

@@ -13,7 +13,9 @@ class QuayTagInfo:
     manifest_digest: str
 
 
-def list_active_repo_tags(c: Container, tag_name: str = "") -> Generator[dict, Any, None]:
+def list_active_repo_tags(
+    c: Container, tag_name: str = "", tag_name_pattern: str = ""
+) -> Generator[dict, Any, None]:
     """List repository tags
 
     Make GET HTTP request to Quay API ``listRepoTags``.
@@ -26,6 +28,8 @@ def list_active_repo_tags(c: Container, tag_name: str = "") -> Generator[dict, A
         params = {"page": str(page), "onlyActiveTags": "true"}
         if tag_name:
             params["specificTag"] = tag_name
+        if tag_name_pattern:
+            params["filter_tag_name"] = f"like:{tag_name_pattern}"
         api_url = f"https://{c.registry}/api/v1/repository/{c.namespace}/{c.repository}/tag/"
         resp = requests.get(api_url, params=params)
         resp.raise_for_status()

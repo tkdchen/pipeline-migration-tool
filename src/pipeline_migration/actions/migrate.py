@@ -2,6 +2,7 @@ import argparse
 import json
 import logging
 import os.path
+import operator
 import re
 import subprocess as sp
 import tempfile
@@ -109,7 +110,43 @@ def only_tags_pinned_by_version_revision(tags_info: Iterable[dict]) -> Generator
             yield tag_info
 
 
-def drop_out_of_order_versions(tags_info: Iterable[dict], stop_at_digest: str) -> Iterable[dict]:
+def expand_versions(from_: str, to: str) -> list[str]:
+    """Expand versions
+
+    Example:
+
+        from 0.2 to 0.2 => ["0.2"]
+        from 0.2 to 0.3 => ["0.2", "0.3"]
+        from 0.2 to 0.5 => ["0.2", "0.3", "0.4", "0.5"]
+
+    This expansion only works with the version management based on the minor version.
+    """
+    from_version = parse_version(from_)
+    to_version = parse_version(to)
+    if from_version > to_version:
+        raise ValueError(f"From version {from_} is greater than the to version {to}.")
+    return [f"0.{minor}" for minor in range(int(from_version.minor), int(to_version.minor) + 1)]
+
+
+def list_bundle_tags(bundle_upgrade: TaskBundleUpgrade) -> list[dict]:
+    versions = expand_versions(bundle_upgrade.current_value, bundle_upgrade.new_value)
+    tags: list[dict] = []
+    c = Container(bundle_upgrade.dep_name)
+    for version in versions:
+        iter_tags = list_active_repo_tags(c, tag_name_pattern=f"{version}-")
+        try:
+            first_tag = next(iter_tags)
+        except StopIteration:
+            logger.info("No tag is queried from registry for version %s", version)
+            continue
+        tags.append(first_tag)
+        tags.extend(only_tags_pinned_by_version_revision(iter_tags))
+    return sorted(tags, key=operator.itemgetter("start_ts"))
+
+
+def drop_out_of_order_versions(
+    tags_info: Iterable[dict], bundle_upgrade: TaskBundleUpgrade
+) -> Iterable[dict]:
     """Drop version tags that are out of order.
 
     Once a new version is bumped for a task, there should be no reason to attach
@@ -130,28 +167,29 @@ def drop_out_of_order_versions(tags_info: Iterable[dict], stop_at_digest: str) -
     :param tags_info: tags information responded by Quay.io listRepoTags endpoint.
         Each tag mapping must have a tag name pinned by version and revision, for
         example, ``0.2-<commit hash>``.
-    :param stop_at_digest: str, stop iterating tags at the one with this digest.
-        Empty string causes iterating through all tags.
     """
-    relevant_tags = []
-    for tag in tags_info:
-        relevant_tags.append(tag)
-        if tag["manifest_digest"] == stop_at_digest:
-            break
 
     tags_that_follow_correct_version_order = []
     highest_version_so_far = None
 
-    # Iterate through the tags from oldest to newest, drop versions that are out of order
-    for tag in reversed(relevant_tags):
+    for tag in reversed(list(tags_info)):
         version = parse_version(tag["name"].split("-")[0])
-
         if highest_version_so_far is None or version >= highest_version_so_far:
             tags_that_follow_correct_version_order.append(tag)
             highest_version_so_far = version
 
+    if not tags_that_follow_correct_version_order:
+        return tags_that_follow_correct_version_order
+
     # Return the result in the same order as the input data (newest to oldest)
-    return reversed(tags_that_follow_correct_version_order)
+    ordered_tags = []
+    tags_iter = reversed(tags_that_follow_correct_version_order)
+    for tag in tags_iter:
+        if tag["manifest_digest"] == bundle_upgrade.new_digest:
+            ordered_tags.append(tag)
+            break
+    ordered_tags.extend(tags_iter)
+    return ordered_tags
 
 
 # TODO: cache this as well?
@@ -174,10 +212,9 @@ def determine_task_bundle_upgrades_range(
     current_bundle = task_bundle_upgrade.current_bundle
     new_bundle = task_bundle_upgrade.new_bundle
 
-    c = Container(task_bundle_upgrade.dep_name)
     tags_info = drop_out_of_order_versions(
-        only_tags_pinned_by_version_revision(list_active_repo_tags(c)),
-        task_bundle_upgrade.current_digest,
+        only_tags_pinned_by_version_revision(list_bundle_tags(task_bundle_upgrade)),
+        task_bundle_upgrade,
     )
     for tag in tags_info:
         quay_tag = QuayTagInfo(name=tag["name"], manifest_digest=tag["manifest_digest"])

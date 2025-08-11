@@ -11,7 +11,7 @@ from io import StringIO
 from ruamel.yaml import CommentedMap, CommentedSeq
 
 
-from pipeline_migration.utils import load_yaml, create_yaml_obj, YAMLStyle
+from pipeline_migration.utils import load_yaml, create_yaml_obj, YAMLStyle, is_flow_style_seq
 
 # YAMLPath type represents path to YAML entity as sequences of strings
 # (for dictionaries) and integers (for arrays). Sequence items represent
@@ -105,6 +105,16 @@ class EditYAMLEntry:
         path_stack = self._get_path_stack(path)
         last_node, _ = path_stack[-1]
 
+        if is_flow_style_seq(last_node):
+            # we must update the parent via replacing
+            last_node = copy.deepcopy(last_node)
+            last_node.fa.set_block_style()
+            if isinstance(last_node, dict):
+                last_node.update(data)
+            else:
+                last_node.append(data)
+            return self.replace(path, last_node)
+
         yaml_str = self._gen_yaml_str(data, last_node.lc.col, seq_block=isinstance(last_node, list))
 
         # Appending as last item
@@ -128,6 +138,12 @@ class EditYAMLEntry:
         """
         path_stack = self._get_path_stack(path)
         last_node, _ = path_stack[-1]
+
+        if is_flow_style_seq(last_node):
+            path_stack, data = self._pre_process_flow_style_replace(path_stack, data)
+            # update last node to use new one
+            last_node, _ = path_stack[-1]
+            assert isinstance(last_node, (dict, list)) and hasattr(last_node, "lc")
 
         # replacing at the same position
         lineno = last_node.lc.line
@@ -170,6 +186,21 @@ class EditYAMLEntry:
         path_stack = self._get_path_stack(path)
         last_node, _ = path_stack[-1]
 
+        if is_flow_style_seq(last_node):
+            # we must update the parent via replacing
+            if len(path_stack) > 1:
+                parent_node, parent_index = path_stack[-2]
+                path = path[:-1]  # instead of deleting item replace content of the parent
+                data = copy.deepcopy(parent_node)
+                data.fa.set_block_style()
+
+                del data[parent_index]
+            else:
+                # removing root node ?
+                data = {}
+
+            return self.replace(path, data)
+
         # removing from the node position
         lineno = last_node.lc.line
         if self._is_parent_dict(path_stack):
@@ -199,10 +230,13 @@ class EditYAMLEntry:
         Method looks for sibling item, if sibling doesn't exist
         recursively check sibling of the parent.
 
-        :returns: line where next item in yaml file begins.
-                EOF (-1) value when it's last item in the yaml file.
-                Line number is 0-indexed.
-        :rtype: int
+        IMPORTANT: this function works only with block style, make sure that
+        path stack points to the block style
+
+        :returns: line where next item in yaml file begins. When
+                None is returned it's EOF (end of file), it's the
+                last item in the yaml file
+        :rtype: int | None
         """
         path_stack = copy.copy(path_stack)
 
@@ -259,6 +293,60 @@ class EditYAMLEntry:
         # Indent each line of the YAML output by the column position
         indented = textwrap.indent(yaml_output, " " * col)
         return indented
+
+    def _pre_process_flow_style_replace(
+        self, path_stack, data: dict | list
+    ) -> Tuple[PathStack, dict | list]:
+        """Flow style isn't fully supported, to comply with it, we will just use the yaml parser
+        to generate  the whole block since the first block style parent entry.
+        If first block is doc root, then everything will be regenerated.
+
+        Returns new path_stack to be used and data; If no change is needed,
+        original path_stack and data are returned
+
+        :param path_stack: current path stack pointing to the desired object
+        :type path_stack: PathStack
+        :param data: current data for replacement
+        :type data: dict | list
+        :returns: tuple that contains new path stack and new data to be used in replacement
+        """
+        if not path_stack:
+            return path_stack, data
+
+        if len(path_stack) < 2:
+            # no parent?
+            return path_stack, data
+
+        node, _ = path_stack[-1]
+        if not is_flow_style_seq(node):
+            return path_stack, data
+
+        # it's FLOW STYLE, yay!!
+        # update data first, we will use existing data to regenerate everything
+        # regenerate in BLOCK STYLE for future
+
+        # filthy data could sneak flow style into yaml
+        # reduce it by one level at least for future
+        if hasattr(data, "fa"):
+            data.fa.set_block_style()
+
+        path_stack = copy.copy(path_stack)
+
+        # update nodes with new data
+        # find first non-flow style parent, and replace it with block data
+        # as we cannot reliably update flow style data
+        while len(path_stack) > 1:
+            node, _ = path_stack[-1]
+            if not is_flow_style_seq(node):
+                break
+            parent, parent_idx = path_stack[-2]
+            path_stack.pop()
+            new_parent = copy.deepcopy(parent)
+            new_parent[parent_idx] = data
+            new_parent.fa.set_block_style()
+            data = new_parent
+
+        return path_stack, data
 
 
 def post_test_yaml_validity(path):

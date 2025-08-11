@@ -399,6 +399,22 @@ class TestEditYAMLEntry:
         return create_yaml_file(content)
 
     @pytest.fixture
+    def simple_yaml_file_flow(self, create_yaml_file):
+        """Create a temporary YAML file with simple structure and flow style."""
+        content = dedent(
+            """\
+            name: test-pipeline
+            spec:
+              tasks:
+                - name: task1
+                  taskRef: {name: clone}
+                  params: [{"name": "repo-url", "value": "https://example.com/example/repo"}]
+            """
+        )
+
+        return create_yaml_file(content)
+
+    @pytest.fixture
     def empty_yaml_file(self, create_yaml_file):
         """Create an empty YAML file."""
         content = "{}\n"
@@ -573,6 +589,31 @@ class TestEditYAMLEntry:
 
         assert read_file_content(simple_yaml_file) == expected
 
+    def test_insert_into_list_flow(self, simple_yaml_file_flow):
+        """Test inserting new item into a list."""
+        editor = EditYAMLEntry(simple_yaml_file_flow)
+
+        new_data = {"name": "new-param", "value": "new-value"}
+        editor.insert(["spec", "tasks", 0, "params"], new_data)
+
+        expected = dedent(
+            """\
+            name: test-pipeline
+            spec:
+              tasks:
+                - name: task1
+                  taskRef: {name: clone}
+                  params:
+                  - {name: repo-url, value: https://example.com/example/repo}
+                  - name: new-param
+                    value: new-value
+            """
+        )
+
+        with open(simple_yaml_file_flow, "r") as f:
+            content = f.read()
+            assert content == expected
+
     def test_replace_dict_value(self, simple_yaml_file):
         """Test replacing a value in a dictionary."""
         editor = EditYAMLEntry(simple_yaml_file)
@@ -596,6 +637,26 @@ class TestEditYAMLEntry:
 
         assert read_file_content(simple_yaml_file) == expected
 
+    def test_replace_dict_value_level_bellow_root(self, simple_yaml_file):
+        """Test replacing a value in a dictionary."""
+        editor = EditYAMLEntry(simple_yaml_file)
+
+        new_data = [{"name": "replaced"}]
+        editor.replace(["spec", "tasks"], new_data)
+
+        expected = dedent(
+            """\
+            name: test-pipeline
+            spec:
+              tasks:
+                - name: replaced
+            """
+        )
+
+        with open(simple_yaml_file, "r") as f:
+            content = f.read()
+            assert content == expected
+
     def test_replace_list_item(self, simple_yaml_file):
         """Test replacing an item in a list."""
         editor = EditYAMLEntry(simple_yaml_file)
@@ -618,6 +679,30 @@ class TestEditYAMLEntry:
         )
 
         assert read_file_content(simple_yaml_file) == expected
+
+    def test_replace_list_item_flow(self, simple_yaml_file_flow):
+        """Test replacing an item in a list."""
+        editor = EditYAMLEntry(simple_yaml_file_flow)
+
+        new_item = {"name": "replaced-item", "value": 999}
+        editor.replace(["spec", "tasks", 0, "params", 0], new_item)
+
+        expected = dedent(
+            """\
+            name: test-pipeline
+            spec:
+              tasks:
+                - name: task1
+                  taskRef: {name: clone}
+                  params:
+                  - name: replaced-item
+                    value: 999
+            """
+        )
+
+        with open(simple_yaml_file_flow, "r") as f:
+            content = f.read()
+            assert content == expected
 
     def test_delete_from_dict(self, simple_yaml_file):
         """Test deleting a key from a dictionary."""
@@ -659,6 +744,27 @@ class TestEditYAMLEntry:
 
         assert read_file_content(simple_yaml_file) == expected
 
+    def test_delete_from_list_flow(self, simple_yaml_file_flow):
+        """Test deleting an item from a list."""
+        editor = EditYAMLEntry(simple_yaml_file_flow)
+
+        editor.delete(["spec", "tasks", 0, "params", 0])
+
+        expected = dedent(
+            """\
+            name: test-pipeline
+            spec:
+              tasks:
+                - name: task1
+                  taskRef: {name: clone}
+                  params: []
+            """
+        )
+
+        with open(simple_yaml_file_flow, "r") as f:
+            content = f.read()
+            assert content == expected
+
     def test_file_not_found(self):
         """Test error when YAML file doesn't exist."""
         non_existent_path = Path("non_existent.yaml")
@@ -696,7 +802,6 @@ class TestEditYAMLEntry:
             # Trying to insert into a string value
             editor.insert(["name"], "new-data")
 
-    @pytest.mark.xfail(reason="TODO: empty dict yaml file is buggy because it's flow style")
     def test_operations_with_empty_yaml(self, empty_yaml_file):
         """Test operations on empty YAML file."""
         editor = EditYAMLEntry(empty_yaml_file)
@@ -763,3 +868,132 @@ class TestEditYAMLEntry:
         editor = EditYAMLEntry(get_next_entry_test_yaml_file)
         path_stack = editor._get_path_stack(yaml_path)
         assert editor._get_next_entry_line(path_stack) == expected_lineno
+
+
+class TestEditYAMLEntryFlowStyle:
+    """Tests for handling partial flow-style YAML structures."""
+
+    @pytest.fixture
+    def flow_style_yaml_file(self, create_yaml_file):
+        """A YAML with flow-style lists and mappings under spec."""
+        content = dedent(
+            """\
+            metadata: {name: flow-pipeline}
+            spec:
+              tasks: [
+                {name: clone, taskRef: {name: git-clone}, params: [
+                  {name: url, value: "https://github.com/example/repo"},
+                  {name: revision, value: "main"}
+                ]},
+                {name: build, taskRef: {name: build}, params: [
+                  {name: IMAGE, value: "buildah"}
+                ]}
+              ]
+            """
+        )
+        return create_yaml_file(content)
+
+    @pytest.fixture
+    def root_flow_seq_file(self, create_yaml_file):
+        """A YAML whose root is a flow-style sequence."""
+        content = """[{a: 1}, {b: 2}, {c: 3}]\n"""
+        return create_yaml_file(content)
+
+    @pytest.fixture
+    def flow_style_map_file(self, create_yaml_file):
+        """A YAML with a flow-style mapping."""
+        content = """config: {a: 1, b: 2}\n"""
+        return create_yaml_file(content)
+
+    def test_insert_into_flow_style_list_converts_to_block_and_appends(self, flow_style_yaml_file):
+        editor = EditYAMLEntry(flow_style_yaml_file)
+        new_param = {"name": "depth", "value": "1"}
+        editor.insert(["spec", "tasks", 0, "params"], new_param)
+
+        expected = dedent(
+            """\
+            metadata: {name: flow-pipeline}
+            spec:
+              tasks:
+              - name: clone
+                taskRef: {name: git-clone}
+                params:
+                - {name: url, value: https://github.com/example/repo}
+                - {name: revision, value: main}
+                - name: depth
+                  value: '1'
+              - {name: build, taskRef: {name: build}, params: [{name: IMAGE, value: buildah}]}
+            """
+        )
+
+        assert read_file_content(flow_style_yaml_file) == expected
+
+    def test_replace_item_inside_flow_style_hierarchy(self, flow_style_yaml_file):
+        editor = EditYAMLEntry(flow_style_yaml_file)
+        new_param = {"name": "depth", "value": "1"}
+        editor.replace(["spec", "tasks", 0, "params", 1], new_param)
+
+        expected = dedent(
+            """\
+            metadata: {name: flow-pipeline}
+            spec:
+              tasks:
+              - name: clone
+                taskRef: {name: git-clone}
+                params:
+                - {name: url, value: https://github.com/example/repo}
+                - name: depth
+                  value: '1'
+              - {name: build, taskRef: {name: build}, params: [{name: IMAGE, value: buildah}]}
+            """
+        )
+
+        assert read_file_content(flow_style_yaml_file) == expected
+
+    def test_delete_from_flow_style_list(self, flow_style_yaml_file):
+        editor = EditYAMLEntry(flow_style_yaml_file)
+        # Delete second param (revision) fromMohammed Rafeeq first task
+        editor.delete(["spec", "tasks", 0, "params", 1])
+
+        expected = dedent(
+            """\
+            metadata: {name: flow-pipeline}
+            spec:
+              tasks:
+              - name: clone
+                taskRef: {name: git-clone}
+                params:
+                - {name: url, value: https://github.com/example/repo}
+              - {name: build, taskRef: {name: build}, params: [{name: IMAGE, value: buildah}]}
+            """
+        )
+
+        assert read_file_content(flow_style_yaml_file) == expected
+
+    def test_delete_from_root_flow_sequence(self, root_flow_seq_file):
+        editor = EditYAMLEntry(root_flow_seq_file)
+        editor.delete([1])  # remove {b: 2}
+
+        expected = dedent(
+            """\
+            - {a: 1}
+            - {c: 3}
+            """
+        )
+
+        assert read_file_content(root_flow_seq_file) == expected
+
+    def test_insert_into_flow_style_mapping(self, flow_style_map_file):
+        editor = EditYAMLEntry(flow_style_map_file)
+        editor.insert(["config"], {"c": 3})
+
+        expected = dedent(
+            """\
+            config:
+              a: 1
+              b: 2
+              c: 3
+            """
+        )
+
+        assert read_file_content(flow_style_map_file) == expected

@@ -104,7 +104,6 @@ class ModTaskAddParamOperation(PipelineFileOperation):
         Given the tasks are located in different locations in pipeline VS pipelineRun objects,
         we need path_prefix consisting of path to the tasks in yaml
         """
-        # TODO: yaml flow style
         path = path_prefix
         task_found = False
         for index, task in enumerate(tasks):
@@ -214,7 +213,6 @@ class ModTaskRemoveParamOperation(PipelineFileOperation):
         Given the tasks are located in different locations in pipeline VS pipelineRun objects,
         we need path_prefix consisting of path to the tasks in yaml
         """
-        # TODO: yaml flow style
         path = path_prefix
         task_found = False
         for index, task in enumerate(tasks):

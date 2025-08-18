@@ -11,6 +11,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Generator, Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
+from itertools import takewhile
 from pathlib import Path
 from typing import Final, Any
 
@@ -282,12 +283,15 @@ def determine_task_bundle_upgrades_range(
         elif this_digest == current_digest:
             current_pos = i
 
+    the_range: Iterable[dict]
+
     if is_out_of_order:
         # This current bundle has been filtered out previously
         logger.info(
             "Current bundle %s is newer than new bundle %s", current_bundle_ref, new_bundle_ref
         )
-        the_range = tags_info[new_pos:]
+        current_version = current_tag_info["name"].split("-")[0]
+        the_range = takewhile(lambda item: item["name"].split("-")[0] != current_version, tags_info)
     else:
         the_range = tags_info[new_pos:current_pos]
     return [QuayTagInfo.from_tag_info(item) for item in the_range]

@@ -149,7 +149,6 @@ class TestDetermineTaskBundleUpdatesRange:
                 {"name": "0.3-0de3", "manifest_digest": "sha256:0de3", "start_ts": 7},
                 {"name": "0.3-6532", "manifest_digest": "sha256:6532", "start_ts": 3},
                 {"name": "0.3-2834", "manifest_digest": "sha256:2834", "start_ts": 2},
-                {"name": "0.2-e8f2", "manifest_digest": "sha256:e8f2", "start_ts": 1},
             ]
         ]
 

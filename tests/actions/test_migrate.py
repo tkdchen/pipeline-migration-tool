@@ -1,6 +1,8 @@
+from collections import defaultdict
 import os
 import itertools
 import logging
+import re
 import subprocess
 from copy import deepcopy
 from pathlib import Path
@@ -34,14 +36,14 @@ from tests.utils import generate_digest
 
 # Tags are listed from the latest to the oldest one.
 SAMPLE_TAGS_OF_NS_APP: Final = [
-    {"name": "0.3-0c9b02c", "manifest_digest": "sha256:bfc0c3c"},
-    {"name": "0.3", "manifest_digest": "sha256:bfc0c3c"},
-    {"name": "0.2-23d463f", "manifest_digest": "sha256:2a2c2b7"},
-    {"name": "0.1-d4eab53", "manifest_digest": "sha256:52f8b96"},
-    {"name": "0.1-b486c47", "manifest_digest": "sha256:9bfc6b9"},
-    {"name": "0.1-9dffe5f", "manifest_digest": "sha256:7f8b549"},
-    {"name": "0.1-3778abd", "manifest_digest": "sha256:bb6de65"},
-    {"name": "0.1-833463f", "manifest_digest": "sha256:69edfd6"},
+    {"name": "0.3-0c9b02c", "manifest_digest": "sha256:bfc0c3c", "start_ts": 7},
+    # {"name": "0.3", "manifest_digest": "sha256:bfc0c3c"},
+    {"name": "0.2-23d463f", "manifest_digest": "sha256:2a2c2b7", "start_ts": 6},
+    {"name": "0.1-d4eab53", "manifest_digest": "sha256:52f8b96", "start_ts": 5},
+    {"name": "0.1-b486c47", "manifest_digest": "sha256:9bfc6b9", "start_ts": 4},
+    {"name": "0.1-9dffe5f", "manifest_digest": "sha256:7f8b549", "start_ts": 3},
+    {"name": "0.1-3778abd", "manifest_digest": "sha256:bb6de65", "start_ts": 2},
+    {"name": "0.1-833463f", "manifest_digest": "sha256:69edfd6", "start_ts": 1},
 ]
 
 APP_IMAGE_REPO: Final = "reg.io/ns/app"
@@ -51,109 +53,188 @@ TASK_BUNDLE_LINT: Final = "quay.io/konflux-ci/catalog/task-lint"
 TASK_BUNDLE_SIGNATURE_SCAN: Final = "quay.io/konflux-ci/some-catalog/task-signature-scan"
 
 
+def mock_list_repo_tags_with_filter_tag_name(
+    image: str, tags_info: list[dict], empty_for_versions: list[str] | None = None
+) -> None:
+    c = Container(image)
+    api_url = f"https://quay.io/api/v1/repository/{c.api_prefix}/tag/"
+    tag_groups: dict[str, list[dict]] = defaultdict(list)
+    for tag in tags_info:
+        version = tag["name"].split("-")[0]
+        tag_groups[version].append(tag)
+    if empty_for_versions:
+        for version in empty_for_versions:
+            tag_groups[version] = []
+    for version, its_tags in tag_groups.items():
+        responses.get(
+            f"{api_url}?page=1&onlyActiveTags=true&filter_tag_name=like:{version}-",
+            json={"tags": its_tags, "page": 1, "has_additional": False},
+        )
+
+
 class TestDetermineTaskBundleUpdatesRange:
+    """Test method determine_task_bundle_upgrades_range
+
+    This test shares test data with ``test_drop_out_of_order_versions`` together.
+    """
+
+    @responses.activate
+    def test_ordered_bundles(self):
+        """Determine range from ordered bundles"""
+        bundle_upgrade = TaskBundleUpgrade(
+            dep_name=TASK_BUNDLE_CLONE,
+            current_value="0.2",
+            current_digest="sha256:1028",
+            new_value="0.3",
+            new_digest="sha256:9854",
+        )
+        tags_info = [
+            {"name": "0.3-9854", "manifest_digest": "sha256:9854", "start_ts": 5},  # <- to
+            {"name": "0.2-2834", "manifest_digest": "sha256:2834", "start_ts": 4},
+            {"name": "0.2-4745", "manifest_digest": "sha256:4745", "start_ts": 3},
+            {"name": "0.2-1028", "manifest_digest": "sha256:1028", "start_ts": 2},  # <- from
+            {"name": "0.2-6582", "manifest_digest": "sha256:6582", "start_ts": 1},
+        ]
+        mock_list_repo_tags_with_filter_tag_name(bundle_upgrade.dep_name, tags_info)
+
+        expected = [
+            QuayTagInfo.from_tag_info(tag)
+            for tag in [
+                {"name": "0.3-9854", "manifest_digest": "sha256:9854", "start_ts": 5},
+                {"name": "0.2-2834", "manifest_digest": "sha256:2834", "start_ts": 4},
+                {"name": "0.2-4745", "manifest_digest": "sha256:4745", "start_ts": 3},
+            ]
+        ]
+        range = determine_task_bundle_upgrades_range(bundle_upgrade)
+        assert range == expected
 
     @responses.activate
     @pytest.mark.parametrize(
-        "task_bundle_upgrade,tags,expected",
+        "upgrade",
         [
-            # No tag is found from repository
-            [
-                TaskBundleUpgrade(
-                    dep_name=APP_IMAGE_REPO,
-                    current_value="0.1",
-                    current_digest="sha256:69edfd6",
-                    new_value="0.1",
-                    new_digest="sha256:6789012",
-                ),
-                [],
-                [],
-            ],
-            # The from_task_bundle is not included in the responded tags
-            [
-                TaskBundleUpgrade(
-                    dep_name=APP_IMAGE_REPO,
-                    current_value="0.1",
-                    current_digest="sha256:1234",
-                    new_value="0.1",
-                    new_digest="sha256:52f8b96",
-                ),
-                SAMPLE_TAGS_OF_NS_APP,
-                ValueError,
-            ],
-            # The to_task_bundle is not included in the responded tags
-            [
-                TaskBundleUpgrade(
-                    dep_name=APP_IMAGE_REPO,
-                    current_value="0.1",
-                    current_digest="sha256:69edfd6",
-                    new_value="0.1",
-                    new_digest="sha256:6789012",
-                ),
-                SAMPLE_TAGS_OF_NS_APP,
-                ValueError,
-            ],
-            # Both from_task_bundle and to_task_bundle are not included in the responded tags
-            [
-                TaskBundleUpgrade(
-                    dep_name=APP_IMAGE_REPO,
-                    current_value="0.1",
-                    current_digest="sha256:1234567",
-                    new_value="0.1",
-                    new_digest="sha256:9087654",
-                ),
-                SAMPLE_TAGS_OF_NS_APP,
-                ValueError,
-            ],
-            # range is found
-            [
-                TaskBundleUpgrade(
-                    dep_name=APP_IMAGE_REPO,
-                    current_value="0.1",
-                    current_digest="sha256:7f8b549",
-                    new_value="0.1",
-                    new_digest="sha256:52f8b96",
-                ),
-                SAMPLE_TAGS_OF_NS_APP,
-                [
-                    QuayTagInfo(name="0.1-d4eab53", manifest_digest="sha256:52f8b96"),
-                    QuayTagInfo(name="0.1-b486c47", manifest_digest="sha256:9bfc6b9"),
-                ],
-            ],
-            # range is found across versions
-            [
-                TaskBundleUpgrade(
-                    dep_name=APP_IMAGE_REPO,
-                    current_value="0.1",
-                    current_digest="sha256:7f8b549",
-                    new_value="0.3",
-                    new_digest="sha256:bfc0c3c",
-                ),
-                SAMPLE_TAGS_OF_NS_APP,
-                [
-                    QuayTagInfo(name="0.3-0c9b02c", manifest_digest="sha256:bfc0c3c"),
-                    QuayTagInfo(name="0.2-23d463f", manifest_digest="sha256:2a2c2b7"),
-                    QuayTagInfo(name="0.1-d4eab53", manifest_digest="sha256:52f8b96"),
-                    QuayTagInfo(name="0.1-b486c47", manifest_digest="sha256:9bfc6b9"),
-                ],
-            ],
+            {
+                "current_value": "0.2",
+                "current_digest": "sha256:4745",
+                "new_value": "0.3",
+                "new_digest": "sha256:0de3",
+            },
+            {
+                "current_value": "0.2",
+                "current_digest": "sha256:8a2d",
+                "new_value": "0.3",
+                "new_digest": "sha256:0de3",
+            },
         ],
     )
-    def test_determine_the_range(self, task_bundle_upgrade: TaskBundleUpgrade, tags, expected):
-        c = Container(task_bundle_upgrade.dep_name)
-        responses.add(
-            responses.GET,
-            f"https://{c.registry}/api/v1/repository/{c.namespace}/{c.repository}/tag/?"
-            "page=1&onlyActiveTags=true",
-            json={"tags": tags, "page": 1, "has_additional": False},
+    def test_out_of_order_bundles(self, upgrade):
+        """Determine range from out-of-order bundles"""
+        bundle_upgrade = TaskBundleUpgrade(dep_name=TASK_BUNDLE_CLONE, **upgrade)
+        tags_info = [
+            {"name": "0.2-8a2d", "manifest_digest": "sha256:8a2d", "start_ts": 10},
+            {"name": "0.1-e37f", "manifest_digest": "sha256:e37f", "start_ts": 9},
+            {"name": "0.2-abcd", "manifest_digest": "sha256:abcd", "start_ts": 8},
+            {"name": "0.3-0de3", "manifest_digest": "sha256:0de3", "start_ts": 7},
+            {"name": "0.2-4745", "manifest_digest": "sha256:4745", "start_ts": 6},
+            {"name": "0.1-f40f", "manifest_digest": "sha256:f40f", "start_ts": 5},
+            {"name": "0.2-9fed", "manifest_digest": "sha256:9fed", "start_ts": 4},
+            {"name": "0.3-6532", "manifest_digest": "sha256:6532", "start_ts": 3},
+            {"name": "0.3-2834", "manifest_digest": "sha256:2834", "start_ts": 2},
+            {"name": "0.2-e8f2", "manifest_digest": "sha256:e8f2", "start_ts": 1},
+        ]
+        mock_list_repo_tags_with_filter_tag_name(bundle_upgrade.dep_name, tags_info)
+
+        expected = [
+            QuayTagInfo.from_tag_info(tag)
+            for tag in [
+                {"name": "0.3-0de3", "manifest_digest": "sha256:0de3", "start_ts": 7},
+                {"name": "0.3-6532", "manifest_digest": "sha256:6532", "start_ts": 3},
+                {"name": "0.3-2834", "manifest_digest": "sha256:2834", "start_ts": 2},
+            ]
+        ]
+
+        range = determine_task_bundle_upgrades_range(bundle_upgrade)
+        assert range == expected
+
+    @responses.activate
+    @pytest.mark.parametrize(
+        "upgrade",
+        [
+            {
+                "current_value": "0.2",
+                "current_digest": "sha256:9999",
+                "new_value": "0.3",
+                "new_digest": "sha256:2834",
+            },
+            {
+                "current_value": "0.2",
+                "current_digest": "sha256:e8f2",
+                "new_value": "0.3",
+                "new_digest": "sha256:0000",
+            },
+        ],
+    )
+    def test_invalid_input_digest(self, upgrade, caplog):
+        caplog.set_level(logging.WARNING)
+
+        """Test empty list is returned if input digest is invalid"""
+        bundle_upgrade = TaskBundleUpgrade(dep_name=TASK_BUNDLE_CLONE, **upgrade)
+        tags_info = [
+            {"name": "0.3-6532", "manifest_digest": "sha256:6532", "start_ts": 3},
+            {"name": "0.3-2834", "manifest_digest": "sha256:2834", "start_ts": 2},
+            {"name": "0.2-e8f2", "manifest_digest": "sha256:e8f2", "start_ts": 1},
+        ]
+        mock_list_repo_tags_with_filter_tag_name(bundle_upgrade.dep_name, tags_info)
+
+        range = determine_task_bundle_upgrades_range(bundle_upgrade)
+        assert range == []
+
+        bundle_regex = rf"{bundle_upgrade.dep_name}:0\.[23]@sha256:(9999|0000)"
+        log_regex = re.compile(rf"Registry does not have (current|new) bundle {bundle_regex}")
+        assert log_regex.search(caplog.text)
+
+    @responses.activate
+    def test_repo_is_in_pure_new_tag_scheme(self):
+        """Test return empty list if image repo only has new tag scheme"""
+        bundle_upgrade = TaskBundleUpgrade(
+            dep_name=TASK_BUNDLE_CLONE,
+            current_value="0.2",
+            current_digest="sha256:1028",
+            new_value="0.3",
+            new_digest="sha256:9854",
         )
 
-        if isinstance(expected, list):
-            tags_range = determine_task_bundle_upgrades_range(task_bundle_upgrade)
-            assert tags_range == expected
-        else:
-            with pytest.raises(expected):
-                determine_task_bundle_upgrades_range(task_bundle_upgrade)
+        # If a repo has the pure new tag scheme, no tag is retrieved from registry.
+        mock_list_repo_tags_with_filter_tag_name(
+            bundle_upgrade.dep_name, [], empty_for_versions=["0.2", "0.3"]
+        )
+
+        assert determine_task_bundle_upgrades_range(bundle_upgrade) == []
+
+    @responses.activate
+    def test_repo_mixes_two_tag_schemes(self):
+        """
+        Test return empty list if image repo mixes build-definitions style and the new schemes
+        """
+        bundle_upgrade = TaskBundleUpgrade(
+            dep_name=TASK_BUNDLE_CLONE,
+            current_value="0.2",
+            current_digest="sha256:1028",
+            new_value="0.3",
+            new_digest="sha256:9854",
+        )
+        tags_info = [
+            {"name": "0.2-4745", "manifest_digest": "sha256:4745", "start_ts": 6},
+            {"name": "0.2-9fed", "manifest_digest": "sha256:9fed", "start_ts": 4},
+            {"name": "0.2-1028", "manifest_digest": "sha256:e8f2", "start_ts": 1},
+        ]
+
+        # When mixing the tag schemes, version 0.3 bundles are pushed in a new form, which means
+        # there are no longer tags like ``0.3-<commit hash>``.
+        mock_list_repo_tags_with_filter_tag_name(
+            bundle_upgrade.dep_name, tags_info, empty_for_versions=["0.3"]
+        )
+
+        assert determine_task_bundle_upgrades_range(bundle_upgrade) == []
 
 
 class TestTaskBundleUpgrade:
@@ -326,10 +407,10 @@ class TestResolveMigrations:
         manager = TaskBundleUpgradesManager(renovate_upgrades, SimpleIterationResolver)
         tb_upgrade = list(manager._task_bundle_upgrades.items())[0][1]
 
-        c = Container(tb_upgrade.dep_name)
-        responses.get(
-            f"https://quay.io/api/v1/repository/{c.api_prefix}/tag/?page=1&onlyActiveTags=true",
-            json={"tags": [], "page": 1, "has_additional": False},
+        mock_list_repo_tags_with_filter_tag_name(
+            tb_upgrade.dep_name,
+            [],
+            empty_for_versions=[tb_upgrade.current_value, tb_upgrade.new_value],
         )
 
         manager.resolve_migrations()
@@ -349,28 +430,28 @@ class TestResolveMigrations:
             {
                 "name": f"{tb_upgrade.new_value}-837e2cd",
                 "manifest_digest": tb_upgrade.new_digest,
+                "start_ts": 4,
             },
             # Make this one have a migration
             {
                 "name": f"{tb_upgrade.new_value}-5678abc",
                 "manifest_digest": digests_of_images_having_migration[0],
+                "start_ts": 3,
             },
             # Make this one have a migration
             {
                 "name": f"{tb_upgrade.new_value}-238f2a7",
                 "manifest_digest": digests_of_images_having_migration[1],
+                "start_ts": 2,
             },
             {
                 "name": f"{tb_upgrade.current_value}-127a2be",
                 "manifest_digest": tb_upgrade.current_digest,
+                "start_ts": 1,
             },
         ]
 
-        c = Container(tb_upgrade.dep_name)
-        responses.get(
-            f"https://quay.io/api/v1/repository/{c.api_prefix}/tag/?page=1&onlyActiveTags=true",
-            json={"tags": tags_info, "page": 1, "has_additional": False},
-        )
+        mock_list_repo_tags_with_filter_tag_name(tb_upgrade.dep_name, tags_info)
 
         for tag in tags_info:
             c = Container(tb_upgrade.dep_name)
@@ -561,20 +642,14 @@ class TestLinkedMigrationsResolver:
         self, case_, image_manifest, mock_get_manifest, tmp_path
     ):
         tb_upgrade = TaskBundleUpgrade(
-            dep_name=APP_IMAGE_REPO,
+            dep_name=TASK_BUNDLE_CLONE,
             current_value="0.1",
             current_digest="sha256:bb6de65",
             new_value="0.2",
             new_digest="sha256:2a2c2b7",
         )
 
-        c = Container(tb_upgrade.dep_name)
-        responses.add(
-            responses.GET,
-            f"https://{c.registry}/api/v1/repository/{c.namespace}/{c.repository}/tag/?"
-            "page=1&onlyActiveTags=true",
-            json={"tags": SAMPLE_TAGS_OF_NS_APP, "page": 1, "has_additional": False},
-        )
+        mock_list_repo_tags_with_filter_tag_name(tb_upgrade.dep_name, SAMPLE_TAGS_OF_NS_APP)
 
         c = Container(f"{tb_upgrade.dep_name}@{tb_upgrade.new_digest}")
         match case_:
@@ -603,20 +678,14 @@ class TestLinkedMigrationsResolver:
         """
 
         tb_upgrade = TaskBundleUpgrade(
-            dep_name=APP_IMAGE_REPO,
+            dep_name=TASK_BUNDLE_CLONE,
             current_value="0.1",
             current_digest="sha256:bb6de65",
             new_value="0.2",
             new_digest="sha256:2a2c2b7",
         )
 
-        c = Container(tb_upgrade.dep_name)
-        responses.add(
-            responses.GET,
-            f"https://{c.registry}/api/v1/repository/{c.namespace}/{c.repository}/tag/?"
-            "page=1&onlyActiveTags=true",
-            json={"tags": SAMPLE_TAGS_OF_NS_APP, "page": 1, "has_additional": False},
-        )
+        mock_list_repo_tags_with_filter_tag_name(tb_upgrade.dep_name, SAMPLE_TAGS_OF_NS_APP)
 
         expected_migrations_count = 0
 
@@ -676,16 +745,13 @@ class TestLinkedMigrationsResolver:
         )
 
         c = Container(tb_upgrade.dep_name)
-        tags = [
-            {"name": "0.3", "manifest_digest": "sha256:bfc0c3c"},
-            {"name": f"sha256-{generate_digest()}", "manifest_digest": "sha256:bfc0c3c"},
-        ]
-        responses.add(
-            responses.GET,
-            f"https://{c.registry}/api/v1/repository/{c.namespace}/{c.repository}/tag/?"
-            "page=1&onlyActiveTags=true",
-            json={"tags": tags, "page": 1, "has_additional": False},
-        )
+        for version in ["0.1", "0.2"]:
+            responses.add(
+                responses.GET,
+                f"https://{c.registry}/api/v1/repository/{c.namespace}/{c.repository}/tag/?"
+                f"page=1&onlyActiveTags=true&filter_tag_name=like:{version}-",
+                json={"tags": [], "page": 1, "has_additional": False},
+            )
 
         resolver = LinkedMigrationsResolver()
         resolver.resolve([tb_upgrade])
@@ -694,130 +760,307 @@ class TestLinkedMigrationsResolver:
         assert log_text in caplog.text
 
 
+@responses.activate
 @pytest.mark.parametrize(
-    "tags_info,stop_at,expected",
+    "tags_info,bundle_upgrade,expected",
     [
-        pytest.param([], "", [], id="empty-input-tags"),
         pytest.param(
-            [{"name": "0.2-2834", "manifest_digest": "sha256@1234"}],
-            "",
-            [{"name": "0.2-2834", "manifest_digest": "sha256@1234"}],
+            [],
+            TaskBundleUpgrade(
+                dep_name=TASK_BUNDLE_CLONE,
+                current_value="0.2",
+                current_digest="sha256:4745",
+                new_value="0.2",
+                new_digest="sha256:6582",
+            ),
+            [[], None, None, False],
+            id="empty-input-tags",
+        ),
+        pytest.param(
+            [{"name": "0.2-2834", "manifest_digest": "sha256:2834", "start_ts": 1}],
+            TaskBundleUpgrade(
+                dep_name=TASK_BUNDLE_CLONE,
+                current_value="0.2",
+                current_digest="sha256:def7",
+                new_value="0.2",
+                new_digest="sha256:2834",
+            ),
+            [
+                [{"name": "0.2-2834", "manifest_digest": "sha256:2834", "start_ts": 1}],
+                None,
+                {"name": "0.2-2834", "manifest_digest": "sha256:2834", "start_ts": 1},
+                False,
+            ],
             id="single-tag",
         ),
         pytest.param(
+            [{"name": "0.2-2834", "manifest_digest": "sha256:2834", "start_ts": 1}],
+            TaskBundleUpgrade(
+                dep_name=TASK_BUNDLE_CLONE,
+                current_value="0.2",
+                current_digest="sha256:2834",
+                new_value="0.2",
+                new_digest="sha256:def7",
+            ),
             [
-                {"name": "0.2-2834", "manifest_digest": "sha256@1234"},
-                {"name": "0.2-4745", "manifest_digest": "sha256@4745"},
+                [{"name": "0.2-2834", "manifest_digest": "sha256:2834", "start_ts": 1}],
+                {"name": "0.2-2834", "manifest_digest": "sha256:2834", "start_ts": 1},
+                None,
+                False,
             ],
-            "",
-            [
-                {"name": "0.2-2834", "manifest_digest": "sha256@1234"},
-                {"name": "0.2-4745", "manifest_digest": "sha256@4745"},
-            ],
-            id="two-tags-within-same-version",
+            id="single-tag-2",
         ),
         pytest.param(
             [
-                {"name": "0.2-2834", "manifest_digest": "sha256@2834"},
-                {"name": "0.2-4745", "manifest_digest": "sha256@4745"},
-                {"name": "0.2-1028", "manifest_digest": "sha256@1028"},
-                {"name": "0.2-6582", "manifest_digest": "sha256@6582"},
+                {"name": "0.2-2834", "manifest_digest": "sha256:2834", "start_ts": 4},
+                {"name": "0.2-4745", "manifest_digest": "sha256:4745", "start_ts": 3},  # <- to
+                {"name": "0.2-1028", "manifest_digest": "sha256:1028", "start_ts": 2},
+                {"name": "0.2-6582", "manifest_digest": "sha256:6582", "start_ts": 1},  # <- from
             ],
-            "",
+            TaskBundleUpgrade(
+                dep_name=TASK_BUNDLE_CLONE,
+                current_value="0.2",
+                current_digest="sha256:6582",
+                new_value="0.2",
+                new_digest="sha256:4745",
+            ),
             [
-                {"name": "0.2-2834", "manifest_digest": "sha256@2834"},
-                {"name": "0.2-4745", "manifest_digest": "sha256@4745"},
-                {"name": "0.2-1028", "manifest_digest": "sha256@1028"},
-                {"name": "0.2-6582", "manifest_digest": "sha256@6582"},
+                [
+                    {"name": "0.2-2834", "manifest_digest": "sha256:2834", "start_ts": 4},
+                    {"name": "0.2-4745", "manifest_digest": "sha256:4745", "start_ts": 3},
+                    {"name": "0.2-1028", "manifest_digest": "sha256:1028", "start_ts": 2},
+                    {"name": "0.2-6582", "manifest_digest": "sha256:6582", "start_ts": 1},
+                ],
+                {"name": "0.2-6582", "manifest_digest": "sha256:6582", "start_ts": 1},
+                {"name": "0.2-4745", "manifest_digest": "sha256:4745", "start_ts": 3},
+                False,
             ],
             id="more-tags-within-version",
         ),
         pytest.param(
             [
-                {"name": "0.3-2834", "manifest_digest": "sha256@2834"},
-                {"name": "0.2-4745", "manifest_digest": "sha256@4745"},
+                {"name": "0.3-2834", "manifest_digest": "sha256:2834", "start_ts": 2},
+                {"name": "0.2-4745", "manifest_digest": "sha256:4745", "start_ts": 1},
             ],
-            "",
+            TaskBundleUpgrade(
+                dep_name=TASK_BUNDLE_CLONE,
+                current_value="0.2",
+                current_digest="sha256:4745",
+                new_value="0.3",
+                new_digest="sha256:2834",
+            ),
             [
-                {"name": "0.3-2834", "manifest_digest": "sha256@2834"},
-                {"name": "0.2-4745", "manifest_digest": "sha256@4745"},
+                [
+                    {"name": "0.3-2834", "manifest_digest": "sha256:2834", "start_ts": 2},
+                    {"name": "0.2-4745", "manifest_digest": "sha256:4745", "start_ts": 1},
+                ],
+                {"name": "0.2-4745", "manifest_digest": "sha256:4745", "start_ts": 1},
+                {"name": "0.3-2834", "manifest_digest": "sha256:2834", "start_ts": 2},
+                False,
             ],
             id="two-tags-newer-version-is-built",
         ),
         pytest.param(
             [
-                {"name": "0.2-4745", "manifest_digest": "sha256@4745"},
-                {"name": "0.3-2834", "manifest_digest": "sha256@2834"},
+                {"name": "0.2-4745", "manifest_digest": "sha256:4745", "start_ts": 2},
+                {"name": "0.3-2834", "manifest_digest": "sha256:2834", "start_ts": 1},
             ],
-            "",
-            [{"name": "0.3-2834", "manifest_digest": "sha256@2834"}],
+            TaskBundleUpgrade(
+                dep_name=TASK_BUNDLE_CLONE,
+                current_value="0.2",
+                current_digest="sha256:4745",
+                new_value="0.3",
+                new_digest="sha256:2834",
+            ),
+            [
+                [{"name": "0.3-2834", "manifest_digest": "sha256:2834", "start_ts": 1}],
+                {"name": "0.2-4745", "manifest_digest": "sha256:4745", "start_ts": 2},
+                {"name": "0.3-2834", "manifest_digest": "sha256:2834", "start_ts": 1},
+                True,
+            ],
             id="two-tags-older-version-is-built",
         ),
         pytest.param(
             [
-                {"name": "0.2-abcd", "manifest_digest": "sha256@abcd"},
-                {"name": "0.3-0de3", "manifest_digest": "sha256@0de3"},
-                {"name": "0.2-4745", "manifest_digest": "sha256@4745"},
-                {"name": "0.3-6532", "manifest_digest": "sha256@6532"},
-                {"name": "0.3-2834", "manifest_digest": "sha256@2834"},
-                {"name": "0.2-e8f2", "manifest_digest": "sha256@e8f2"},
+                {"name": "0.2-abcd", "manifest_digest": "sha256:abcd", "start_ts": 6},
+                {"name": "0.3-0de3", "manifest_digest": "sha256:0de3", "start_ts": 5},
+                {"name": "0.2-4745", "manifest_digest": "sha256:4745", "start_ts": 4},  # <- from
+                {"name": "0.3-6532", "manifest_digest": "sha256:6532", "start_ts": 3},  # <- to
+                {"name": "0.3-2834", "manifest_digest": "sha256:2834", "start_ts": 2},
+                {"name": "0.2-e8f2", "manifest_digest": "sha256:e8f2", "start_ts": 1},
             ],
-            "",
+            TaskBundleUpgrade(
+                dep_name=TASK_BUNDLE_CLONE,
+                current_value="0.2",
+                current_digest="sha256:4745",
+                new_value="0.3",
+                new_digest="sha256:6532",
+            ),
             [
-                {"name": "0.3-0de3", "manifest_digest": "sha256@0de3"},
-                {"name": "0.3-6532", "manifest_digest": "sha256@6532"},
-                {"name": "0.3-2834", "manifest_digest": "sha256@2834"},
-                {"name": "0.2-e8f2", "manifest_digest": "sha256@e8f2"},
+                [
+                    {"name": "0.3-0de3", "manifest_digest": "sha256:0de3", "start_ts": 5},
+                    {"name": "0.3-6532", "manifest_digest": "sha256:6532", "start_ts": 3},
+                    {"name": "0.3-2834", "manifest_digest": "sha256:2834", "start_ts": 2},
+                    {"name": "0.2-e8f2", "manifest_digest": "sha256:e8f2", "start_ts": 1},
+                ],
+                {"name": "0.2-4745", "manifest_digest": "sha256:4745", "start_ts": 4},
+                {"name": "0.3-6532", "manifest_digest": "sha256:6532", "start_ts": 3},
+                True,
             ],
             id="tags-with-mixed-versions",
         ),
         pytest.param(
             [
-                {"name": "0.3-fed0", "manifest_digest": "sha256@fed0"},
-                {"name": "0.4-def4", "manifest_digest": "sha256@def4"},
-                {"name": "0.2-8a2d", "manifest_digest": "sha256@8a2d"},
-                {"name": "0.1-e37f", "manifest_digest": "sha256@e37f"},
-                {"name": "0.2-abcd", "manifest_digest": "sha256@abcd"},
-                {"name": "0.3-0de3", "manifest_digest": "sha256@0de3"},
-                {"name": "0.2-4745", "manifest_digest": "sha256@4745"},
-                {"name": "0.1-f40f", "manifest_digest": "sha256@f40f"},
-                {"name": "0.2-9fed", "manifest_digest": "sha256@9fed"},
-                {"name": "0.3-6532", "manifest_digest": "sha256@6532"},
-                {"name": "0.3-2834", "manifest_digest": "sha256@2834"},
-                {"name": "0.2-e8f2", "manifest_digest": "sha256@e8f2"},
+                {"name": "0.3-fed0", "manifest_digest": "sha256:fed0", "start_ts": 12},
+                {"name": "0.4-def4", "manifest_digest": "sha256:def4", "start_ts": 11},  # <- to
+                {"name": "0.2-8a2d", "manifest_digest": "sha256:8a2d", "start_ts": 10},
+                {"name": "0.1-e37f", "manifest_digest": "sha256:e37f", "start_ts": 9},
+                {"name": "0.2-abcd", "manifest_digest": "sha256:abcd", "start_ts": 8},
+                {"name": "0.3-0de3", "manifest_digest": "sha256:0de3", "start_ts": 7},
+                {"name": "0.2-4745", "manifest_digest": "sha256:4745", "start_ts": 6},
+                {"name": "0.1-f40f", "manifest_digest": "sha256:f40f", "start_ts": 5},
+                {"name": "0.2-9fed", "manifest_digest": "sha256:9fed", "start_ts": 4},
+                {"name": "0.3-6532", "manifest_digest": "sha256:6532", "start_ts": 3},
+                {"name": "0.3-2834", "manifest_digest": "sha256:2834", "start_ts": 2},
+                {"name": "0.2-e8f2", "manifest_digest": "sha256:e8f2", "start_ts": 1},  # <- from
             ],
-            "",
+            TaskBundleUpgrade(
+                dep_name=TASK_BUNDLE_CLONE,
+                current_value="0.2",
+                current_digest="sha256:e8f2",
+                new_value="0.4",
+                new_digest="sha256:def4",
+            ),
             [
-                {"name": "0.4-def4", "manifest_digest": "sha256@def4"},
-                {"name": "0.3-0de3", "manifest_digest": "sha256@0de3"},
-                {"name": "0.3-6532", "manifest_digest": "sha256@6532"},
-                {"name": "0.3-2834", "manifest_digest": "sha256@2834"},
-                {"name": "0.2-e8f2", "manifest_digest": "sha256@e8f2"},
+                [
+                    {"name": "0.4-def4", "manifest_digest": "sha256:def4", "start_ts": 11},
+                    {"name": "0.3-0de3", "manifest_digest": "sha256:0de3", "start_ts": 7},
+                    {"name": "0.3-6532", "manifest_digest": "sha256:6532", "start_ts": 3},
+                    {"name": "0.3-2834", "manifest_digest": "sha256:2834", "start_ts": 2},
+                    {"name": "0.2-e8f2", "manifest_digest": "sha256:e8f2", "start_ts": 1},
+                ],
+                {"name": "0.2-e8f2", "manifest_digest": "sha256:e8f2", "start_ts": 1},
+                {"name": "0.4-def4", "manifest_digest": "sha256:def4", "start_ts": 11},
+                False,
             ],
             id="tags-more-older-versions-are-built",
         ),
         pytest.param(
             [
-                {"name": "0.2-8a2d", "manifest_digest": "sha256@8a2d"},
-                {"name": "0.1-e37f", "manifest_digest": "sha256@e37f"},
-                {"name": "0.2-abcd", "manifest_digest": "sha256@abcd"},
-                {"name": "0.3-0de3", "manifest_digest": "sha256@0de3"},
-                {"name": "0.2-4745", "manifest_digest": "sha256@4745"},
-                {"name": "0.1-f40f", "manifest_digest": "sha256@f40f"},
-                {"name": "0.2-9fed", "manifest_digest": "sha256@9fed"},
-                {"name": "0.3-6532", "manifest_digest": "sha256@6532"},
-                {"name": "0.3-2834", "manifest_digest": "sha256@2834"},
-                {"name": "0.2-e8f2", "manifest_digest": "sha256@e8f2"},
+                {"name": "0.2-8a2d", "manifest_digest": "sha256:8a2d", "start_ts": 10},
+                {"name": "0.1-e37f", "manifest_digest": "sha256:e37f", "start_ts": 9},
+                {"name": "0.2-abcd", "manifest_digest": "sha256:abcd", "start_ts": 8},
+                {"name": "0.3-0de3", "manifest_digest": "sha256:0de3", "start_ts": 7},  # <- to
+                {"name": "0.2-4745", "manifest_digest": "sha256:4745", "start_ts": 6},  # <- from
+                {"name": "0.1-f40f", "manifest_digest": "sha256:f40f", "start_ts": 5},
+                {"name": "0.2-9fed", "manifest_digest": "sha256:9fed", "start_ts": 4},
+                {"name": "0.3-6532", "manifest_digest": "sha256:6532", "start_ts": 3},
+                {"name": "0.3-2834", "manifest_digest": "sha256:2834", "start_ts": 2},
+                {"name": "0.2-e8f2", "manifest_digest": "sha256:e8f2", "start_ts": 1},
             ],
-            "sha256@2834",
+            TaskBundleUpgrade(
+                dep_name=TASK_BUNDLE_CLONE,
+                current_value="0.2",
+                current_digest="sha256:4745",
+                new_value="0.3",
+                new_digest="sha256:0de3",
+            ),
             [
-                {"name": "0.3-0de3", "manifest_digest": "sha256@0de3"},
-                {"name": "0.3-6532", "manifest_digest": "sha256@6532"},
-                {"name": "0.3-2834", "manifest_digest": "sha256@2834"},
+                [
+                    {"name": "0.3-0de3", "start_ts": 7, "manifest_digest": "sha256:0de3"},
+                    {"name": "0.3-6532", "start_ts": 3, "manifest_digest": "sha256:6532"},
+                    {"name": "0.3-2834", "start_ts": 2, "manifest_digest": "sha256:2834"},
+                    {"name": "0.2-e8f2", "start_ts": 1, "manifest_digest": "sha256:e8f2"},
+                ],
+                {"name": "0.2-4745", "manifest_digest": "sha256:4745", "start_ts": 6},
+                {"name": "0.3-0de3", "start_ts": 7, "manifest_digest": "sha256:0de3"},
+                True,
             ],
-            id="tags-stop-earlier",
+            id="upgrade-from-bundle-of-old-version-built-after-newer-version",
+        ),
+        pytest.param(
+            [
+                {"name": "0.2-8a2d", "manifest_digest": "sha256:8a2d", "start_ts": 10},  # <- from
+                {"name": "0.1-e37f", "manifest_digest": "sha256:e37f", "start_ts": 9},
+                {"name": "0.2-abcd", "manifest_digest": "sha256:abcd", "start_ts": 8},
+                {"name": "0.3-0de3", "manifest_digest": "sha256:0de3", "start_ts": 7},  # <- to
+                {"name": "0.2-4745", "manifest_digest": "sha256:4745", "start_ts": 6},
+                {"name": "0.1-f40f", "manifest_digest": "sha256:f40f", "start_ts": 5},
+                {"name": "0.2-9fed", "manifest_digest": "sha256:9fed", "start_ts": 4},
+                {"name": "0.3-6532", "manifest_digest": "sha256:6532", "start_ts": 3},
+                {"name": "0.3-2834", "manifest_digest": "sha256:2834", "start_ts": 2},
+                {"name": "0.2-e8f2", "manifest_digest": "sha256:e8f2", "start_ts": 1},
+            ],
+            TaskBundleUpgrade(
+                dep_name=TASK_BUNDLE_CLONE,
+                current_value="0.2",
+                current_digest="sha256:8a2d",
+                new_value="0.3",
+                new_digest="sha256:0de3",
+            ),
+            [
+                [
+                    {"name": "0.3-0de3", "start_ts": 7, "manifest_digest": "sha256:0de3"},
+                    {"name": "0.3-6532", "start_ts": 3, "manifest_digest": "sha256:6532"},
+                    {"name": "0.3-2834", "start_ts": 2, "manifest_digest": "sha256:2834"},
+                    {"name": "0.2-e8f2", "start_ts": 1, "manifest_digest": "sha256:e8f2"},
+                ],
+                {"name": "0.2-8a2d", "manifest_digest": "sha256:8a2d", "start_ts": 10},
+                {"name": "0.3-0de3", "start_ts": 7, "manifest_digest": "sha256:0de3"},
+                True,
+            ],
+            id="upgrade-from-bundle-of-old-version-built-after-newer-version-2",
+        ),
+        pytest.param(
+            [
+                {"name": "0.2-abcd", "manifest_digest": "sha256:abcd", "start_ts": 6},
+                {"name": "0.3-0de3", "manifest_digest": "sha256:0de3", "start_ts": 5},
+                {"name": "0.2-4745", "manifest_digest": "sha256:4745", "start_ts": 4},
+                {"name": "0.3-6532", "manifest_digest": "sha256:6532", "start_ts": 3},
+                {"name": "0.3-2834", "manifest_digest": "sha256:2834", "start_ts": 2},
+                {"name": "0.2-e8f2", "manifest_digest": "sha256:e8f2", "start_ts": 1},
+            ],
+            # Both of the digests are not present in the responded tags
+            TaskBundleUpgrade(
+                dep_name=TASK_BUNDLE_CLONE,
+                current_value="0.2",
+                current_digest="sha256:9999",
+                new_value="0.3",
+                new_digest="sha256:0000",
+            ),
+            [
+                [
+                    {"name": "0.3-0de3", "manifest_digest": "sha256:0de3", "start_ts": 5},
+                    {"name": "0.3-6532", "manifest_digest": "sha256:6532", "start_ts": 3},
+                    {"name": "0.3-2834", "manifest_digest": "sha256:2834", "start_ts": 2},
+                    {"name": "0.2-e8f2", "manifest_digest": "sha256:e8f2", "start_ts": 1},
+                ],
+                None,
+                None,
+                False,
+            ],
+            id="digest-is-out-of-range",
         ),
     ],
 )
-def test_drop_out_of_order_versions(tags_info, stop_at, expected):
-    assert list(migrate.drop_out_of_order_versions(tags_info, stop_at)) == expected
+def test_drop_out_of_order_versions(tags_info, bundle_upgrade, expected):
+    c = Container(bundle_upgrade.dep_name)
+    api_url = f"https://quay.io/api/v1/repository/{c.api_prefix}/tag/"
+
+    if tags_info:
+        mock_list_repo_tags_with_filter_tag_name(bundle_upgrade.dep_name, tags_info)
+    else:
+        mock_list_repo_tags_with_filter_tag_name(
+            bundle_upgrade.dep_name,
+            [],
+            empty_for_versions=[bundle_upgrade.current_value, bundle_upgrade.new_value],
+        )
+
+    responses.get(
+        f"{api_url}?page=1&onlyActiveTags=true&filter_tag_name=like:0.100-",
+        json={"tags": [], "page": 1, "has_additional": False},
+    )
+
+    tags = migrate.list_bundle_tags(bundle_upgrade)
+    result = migrate.drop_out_of_order_versions(tags, bundle_upgrade)
+    assert result == tuple(expected)

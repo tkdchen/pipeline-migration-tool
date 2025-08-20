@@ -1,7 +1,8 @@
 import argparse
+from enum import Enum
 import logging
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, List
 
 from ruamel.yaml.comments import CommentedSeq
 
@@ -29,10 +30,25 @@ The following are several examples with a Konflux task push-dockerfile:
         task push-dockerfile \\
         add-param new-param new-value
 
+* Add array of values.
+
+    cd /path/to/repo
+    pmt modify task push-dockerfile add-param -t array new-param new-value1 new-value2
+
+    Note: if the param name exist current values will be replaced, not appended
+
 * Supported task modifications:
    - add-param: adds a new param to the task (or updates existing)
    - remove-param: removes the specified param from the task
 """
+
+
+class ParamType(Enum):
+    string = "string"
+    array = "array"
+
+    def __str__(self):
+        return self.value
 
 
 def register_cli(subparser) -> None:
@@ -59,7 +75,18 @@ def register_cli(subparser) -> None:
         "it updates the value.",
     )
     subparser_add_param.add_argument("param_name", help="parameter name", metavar="PARAM-NAME")
-    subparser_add_param.add_argument("param_value", help="parameter value", metavar="PARAM-VALUE")
+    subparser_add_param.add_argument(
+        "param_value", nargs="+", help="parameter values", metavar="PARAM-VALUE"
+    )
+    subparser_add_param.add_argument(
+        "-t",
+        "--type",
+        dest="param_type",
+        help="parameter type (Default: %(default)s)",
+        type=ParamType,
+        choices=list(ParamType),
+        default=ParamType.string,
+    )
     subparser_add_param.set_defaults(action=action_add_param)
 
     # remove-param
@@ -77,7 +104,7 @@ class ModTaskAddParamOperation(PipelineFileOperation):
         self,
         task_name: str,
         param_name: str,
-        param_value: str,  # TODO: array, object, string values
+        param_value: str | List[str],
     ) -> None:
         self.task_name = task_name
         self.param_name = param_name
@@ -135,7 +162,17 @@ class ModTaskAddParamOperation(PipelineFileOperation):
             for index_param, param in enumerate(task["params"]):
                 if param["name"] == self.param_name:
                     path.append(index_param)
-                    if param["value"] != self.param_value:
+                    if (
+                        param["value"] is None
+                        or (
+                            isinstance(self.param_value, str) and param["value"] != self.param_value
+                        )
+                        or (
+                            # assume that order of params doesn't matter
+                            set(self.param_value)
+                            != set(param["value"])
+                        )
+                    ):
                         param["value"] = self.param_value
                         logger.info(
                             "task '%s' in '%s': param '%s' will be updated",
@@ -174,12 +211,19 @@ class ModTaskAddParamOperation(PipelineFileOperation):
 
 
 def action_add_param(args) -> None:
+    value = args.param_value
+    if args.param_type == ParamType.string:
+        if len(value) > 1:
+
+            raise RuntimeError("Param value must be only one item with string type")
+        value = value[0]  # extract value when type is string
+
     search_places = [path for path in args.file_or_dir if path]
     relative_tekton_dir = Path("./.tekton")
     if not search_places and relative_tekton_dir.exists():
         search_places = [str(relative_tekton_dir.absolute())]
 
-    op = ModTaskAddParamOperation(args.task_name, args.param_name, args.param_value)
+    op = ModTaskAddParamOperation(args.task_name, args.param_name, value)
     for file_path in iterate_files_or_dirs(search_places):
         op.handle(str(file_path))
 

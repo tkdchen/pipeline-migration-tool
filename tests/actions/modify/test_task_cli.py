@@ -198,6 +198,53 @@ class TestModifyTaskAddParam:
         for yaml_file in component_pipeline_dir.tekton_dir.glob("*.yaml"):
             verify_param_added(yaml_file, "clone", "timeout", "30m")
 
+    def test_add_param_to_existing_task_array(self, component_pipeline_dir, monkeypatch):
+        """Test adding a parameter to an existing task as array."""
+        cmd = [
+            "pmt",
+            "modify",
+            "--file-or-dir",
+            str(component_pipeline_dir.tekton_dir),
+            "task",
+            "clone",
+            "add-param",
+            "-t",
+            "array",
+            "timeout",
+            "30m",
+        ]
+
+        monkeypatch.setattr("sys.argv", cmd)
+        entry_point()
+
+        # Verify parameter was added to all pipeline files
+        for yaml_file in component_pipeline_dir.tekton_dir.glob("*.yaml"):
+            verify_param_added(yaml_file, "clone", "timeout", ["30m"])
+
+    def test_add_param_to_existing_task_array_multiple(self, component_pipeline_dir, monkeypatch):
+        """Test adding a parameter to an existing task as array (multiple values)."""
+        cmd = [
+            "pmt",
+            "modify",
+            "--file-or-dir",
+            str(component_pipeline_dir.tekton_dir),
+            "task",
+            "clone",
+            "add-param",
+            "-t",
+            "array",
+            "timeout",
+            "30m",
+            "60m",
+        ]
+
+        monkeypatch.setattr("sys.argv", cmd)
+        entry_point()
+
+        # Verify parameter was added to all pipeline files
+        for yaml_file in component_pipeline_dir.tekton_dir.glob("*.yaml"):
+            verify_param_added(yaml_file, "clone", "timeout", ["30m", "60m"])
+
     def test_add_param_to_task_without_params(self, component_pipeline_dir, monkeypatch):
         """Test adding a parameter to a task that has no existing parameters."""
         cmd = [
@@ -505,6 +552,25 @@ class TestModifyTaskErrorHandling:
         # Should exit with error
         with pytest.raises(SystemExit):
             entry_point()
+
+    def test_array_param_with_string_type(self, monkeypatch):
+        """Array of param values passed when type is string."""
+        cmd = [
+            "pmt",
+            "modify",
+            "task",
+            "clone",
+            "add-param",
+            "-t",
+            "string",
+            "param",
+            "value1",
+            "value2",
+        ]
+
+        monkeypatch.setattr("sys.argv", cmd)
+
+        assert entry_point() != 0
 
     def test_invalid_subcommand(self, monkeypatch):
         """Test that invalid subcommands are handled."""

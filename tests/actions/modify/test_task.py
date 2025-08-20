@@ -226,6 +226,53 @@ class TestModTaskAddParamOperation:
 
         assert read_file_content(pipeline_yaml_file) == expected
 
+    def test_update_existing_param_value_with_array(self, pipeline_yaml_file):
+        """Test updating an existing parameter value."""
+        op = ModTaskAddParamOperation(
+            "clone", "url", ["https://github.com/new/repo", "another_url"]
+        )
+
+        # Load initial data
+        loaded_doc = load_yaml(pipeline_yaml_file)
+        style = YAMLStyle.detect(pipeline_yaml_file)
+        tasks = loaded_doc["spec"]["tasks"]
+
+        # Execute operation
+        result = op._add_param(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
+        assert result is True
+
+        expected = dedent(
+            """\
+            apiVersion: tekton.dev/v1
+            kind: Pipeline
+            metadata:
+              name: test-pipeline
+            spec:
+              tasks:
+                - name: clone
+                  taskRef:
+                    name: git-clone
+                  params:
+                    - name: url
+                      value:
+                      - https://github.com/new/repo
+                      - another_url
+                    - name: revision
+                      value: "main"
+                - name: build
+                  taskRef:
+                    name: buildah
+                  params:
+                    - name: IMAGE
+                      value: "registry.io/app:latest"
+                - name: test-task
+                  taskRef:
+                    name: test-runner
+            """
+        )
+
+        assert read_file_content(pipeline_yaml_file) == expected
+
     def test_no_change_when_param_value_same(self, pipeline_yaml_file):
         """Test that no change is made when parameter value is already the same."""
         op = ModTaskAddParamOperation("clone", "url", "https://github.com/example/repo")

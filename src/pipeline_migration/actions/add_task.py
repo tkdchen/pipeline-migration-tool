@@ -1,7 +1,6 @@
 import argparse
 import logging
 import re
-import subprocess
 from argparse import ArgumentTypeError
 from collections.abc import Generator
 from pathlib import Path
@@ -15,7 +14,7 @@ from ruamel.yaml.scalarstring import DoubleQuotedScalarString
 from pipeline_migration.quay import get_active_tag
 from pipeline_migration.registry import REGISTRY, Container
 from pipeline_migration.types import FilePath
-from pipeline_migration.utils import dump_yaml, YAMLStyle
+from pipeline_migration.utils import dump_yaml, YAMLStyle, git_add
 from pipeline_migration.pipeline import PipelineFileOperation, iterate_files_or_dirs
 
 logger = logging.getLogger("add_task")
@@ -277,26 +276,6 @@ def action(args) -> None:
     op = AddTaskOperation(task_config, pipeline_task_name, actual_task_name, git_add=args.git_add)
     for file_path in iterate_files_or_dirs(search_places):
         op.handle(str(file_path))
-
-
-def git_add(file_path: FilePath) -> None:
-    """Git add given file
-
-    The git-add command may fail due to any reason, e.g. git command is not available in the system,
-    in which case just logging a message and terminate quietly.
-
-    :param file_path: an absolute path to a file.
-    :type file_path: FilePath
-    :raises ValueError: if given file path is not an absolute path.
-    """
-    fp = Path(file_path)
-    if not fp.is_absolute():
-        raise ValueError(f"File path {file_path} is not an absolute path.")
-    cmd = ["git", "add", fp.name]
-    try:
-        subprocess.run(cmd, cwd=fp.parent, capture_output=True, check=True)
-    except subprocess.CalledProcessError as e:
-        logger.warning("%s is not added to git index: %s", file_path, e.stderr)
 
 
 class KonfluxBuildDefinitions:

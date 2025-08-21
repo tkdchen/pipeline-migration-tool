@@ -168,7 +168,7 @@ Releases are versioned in the form of `major.minor.patch`.
 - Minor version is incremented when new feature and backward incompatible changes are introduced.
 - Patch version is incremented when backward compatible changes are introduced.
 
-For examples:
+For example:
 
 - Code refactor: `++patch`
 - Non-code change: `++patch`
@@ -178,13 +178,13 @@ For examples:
 
 ### Steps
 
-Following these steps to make and publish a release. Here takes version `0.4.2` as an example.
+Follow these steps to make and publish a release. Here, version `0.4.2` is used as an example.
 
 - Synchronize with `main` branch
 - Checkout to a release branch `release-0.4.2`
 - Update version in `src/pipeline_migration/__init__.py`
 - Commit the change with title `Release 0.4.2` and open a pull request.
-- Reivew and merge the pull request
+- Review and merge the pull request
 - Go to https://github.com/konflux-ci/pipeline-migration-tool/releases/new
 - Create a new tag `v0.4.2`
 - Ensure the target is `main` branch
@@ -200,7 +200,7 @@ pipeline-migration-tool to the new version.
 
 Post-release steps:
 
-- Highly recommend to link the Renovate update pull request to the release story.
+- It is highly recommend to link the Renovate update pull request to the release story.
 - If there is no release story for the new release, it can be optionally linked to the major feature
   or bugfix JIRA issue.
 - Open a pull request to MintMaker [Renovate configuration]

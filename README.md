@@ -158,6 +158,55 @@ PMT_LOCAL_TEST=1 pmt migrate -u "$(cat /tmp/pmt-test-upgrades.txt)"
 # Check if the tool works as expected.
 ```
 
+## Make a release
+
+### Versioning
+
+Releases are versioned in the form of `major.minor.patch`.
+
+- Major version remains 0.
+- Minor version is incremented when new feature and backward incompatible changes are introduced.
+- Patch version is incremented when backward compatible changes are introduced.
+
+For example:
+
+- Code refactor: `++patch`
+- Non-code change: `++patch`
+- Add a new command line argument: `++minor`
+- A bug fix that does not introduce changes to the original behavior and command line interface:
+  `++patch`, otherwise `++minor`
+
+### Steps
+
+Follow these steps to make and publish a release. Here, version `0.4.2` is used as an example.
+
+- Synchronize with `main` branch
+- Checkout to a release branch `release-0.4.2`
+- Update version in `src/pipeline_migration/__init__.py`
+- Commit the change with title `Release 0.4.2` and open a pull request.
+- Review and merge the pull request
+- Go to https://github.com/konflux-ci/pipeline-migration-tool/releases/new
+- Create a new tag `v0.4.2`
+- Ensure the target is `main` branch
+- Click button `Generate release notes` and refine the release notes if necessary
+- Check `Set as the latest release`
+- Click button `Publish release`
+
+Done 🎉
+
+Then, Renovate will send an update pull request to [konflux-ci/mintmaker-renovate-image]
+(https://github.com/konflux-ci/mintmaker-renovate-image) automatically in order to upgrade
+pipeline-migration-tool to the new version.
+
+Post-release steps:
+
+- It is highly recommend to link the Renovate update pull request to the release story.
+- If there is no release story for the new release, it can be optionally linked to the major feature
+  or bugfix JIRA issue.
+- Open a pull request to MintMaker [Renovate configuration]
+  (https://github.com/konflux-ci/mintmaker/blob/main/config/renovate/renovate.json) when necessary
+  to use new command line interface.
+
 ## License
 
 Copyright 2024.

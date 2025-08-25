@@ -8,13 +8,13 @@ if ! which gh >/dev/null 2>&1; then
     exit 1
 fi
 
-func_name=$1
+func_name=${1:-""}
 if [[ -z "$func_name" ]]; then
     printf "Missing command to run. Doing release in the order of make_release_for_review and merge_and_publish_release\n"
     exit 1
 fi
 
-new_version=$2
+new_version=${2:-""}
 if [[ -z "$new_version" ]]; then
     printf "Please provide a version in form of major.minor.patch\n"
     printf "Existing versions:\n"
@@ -36,7 +36,7 @@ make_release_for_review() {
         git pull
     fi
     git checkout -b "release-${new_version}"
-    sed "s/^__version__ = \"[0-9]\+\.[0-9]\+\.[0-9]\+\"$/__version__ = \"${new_version}\"/" src/pipeline_migration/__init__.py
+    sed -i "s/^__version__ = \"[0-9]\+\.[0-9]\+\.[0-9]\+\"$/__version__ = \"${new_version}\"/" src/pipeline_migration/__init__.py
     git add src/pipeline_migration/__init__.py
     commit_opts=(-s -m "Release ${new_version}")
     if [[ -n "$issue_key" ]]; then

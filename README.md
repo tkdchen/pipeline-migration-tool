@@ -212,9 +212,9 @@ Post-release steps:
 Executes commands in the following order to help making a release:
 
 ```bash
-./hack/make-release make_release_for_review version issue-key
+./hack/make-release.sh make_release_for_review version issue-key
 # Once pull request gets approved, it can be either merged via GitHub web UI or the following step
-./hack/make-release merge_and_publish_release version
+./hack/make-release.sh merge_and_publish_release version
 ```
 
 > [!NOTE]

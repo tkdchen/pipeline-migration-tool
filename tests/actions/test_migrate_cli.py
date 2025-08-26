@@ -1,4 +1,3 @@
-import itertools
 import json
 import logging
 import subprocess
@@ -57,10 +56,29 @@ class ImageTestData:
     manifests: dict[str, dict]  # manifest digest => image manifest
     referrers: dict[str, dict]  # manifest digest => image index
     blobs: dict[str, bytes]  # layer digest => artifact content
+    tags: list[dict[str, str | int]]  # list of tags info
 
 
 task_bundle_clone_test_data = ImageTestData(
     image=TASK_BUNDLE_CLONE,
+    # For mocking listRepoTags endpoint. They are mapped to the following bundle manifests.
+    tags=[
+        {
+            "name": f"0.1-{generate_git_sha()}",
+            "manifest_digest": "sha256:c4bb69a3a08f",
+            "start_ts": 3,
+        },
+        {
+            "name": f"0.1-{generate_git_sha()}",
+            "manifest_digest": "sha256:f23dc7cd74ba",
+            "start_ts": 2,
+        },
+        {
+            "name": f"0.1-{generate_git_sha()}",
+            "manifest_digest": "sha256:492fb9ae4e7e",
+            "start_ts": 1,
+        },
+    ],
     manifests={
         # Task bundles, which are listed from newer one to older one.
         "sha256:c4bb69a3a08f": {
@@ -233,20 +251,7 @@ class TestMigrateTaskBundleUpgrade:
     def _mock_quay_list_tags(self):
 
         for image_data in MockRegistry.test_data:
-            timestamp_gen = itertools.count(len(image_data.manifests), -1)
-            tags = [
-                {
-                    "name": f"0.1-{generate_git_sha()}",
-                    "manifest_digest": digest,
-                    "start_ts": next(timestamp_gen),
-                }
-                for digest, manifest_json in image_data.manifests.items()
-                if manifest_json["config"]["mediaType"] == MEDIA_TYPE_OCI_IMAGE_CONFIG_V1
-            ]
-            # c = Container(image_data.image)
-            # mock_quay_list_tags(c.api_prefix, tags)
-
-            mock_list_repo_tags_with_filter_tag_name(image_data.image, tags)
+            mock_list_repo_tags_with_filter_tag_name(image_data.image, image_data.tags)
 
         # Mock new tag scheme in bundle image repository, so no tag is retrieved for the version.
         mock_list_repo_tags_with_filter_tag_name(

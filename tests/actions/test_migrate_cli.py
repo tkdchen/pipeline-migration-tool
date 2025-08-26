@@ -72,7 +72,10 @@ task_bundle_clone_test_data = ImageTestData(
                 "size": 10,
             },
             "layers": [],
-            "annotations": {ANNOTATION_HAS_MIGRATION: "true"},
+            "annotations": {
+                ANNOTATION_HAS_MIGRATION: "true",
+                ANNOTATION_PREVIOUS_MIGRATION_BUNDLE: "sha256:f23dc7cd74ba",
+            },
         },
         "sha256:f23dc7cd74ba": {
             "schemaVersion": 2,
@@ -83,7 +86,10 @@ task_bundle_clone_test_data = ImageTestData(
                 "size": 11,
             },
             "layers": [],
-            "annotations": {ANNOTATION_HAS_MIGRATION: "true"},
+            "annotations": {
+                ANNOTATION_HAS_MIGRATION: "true",
+                ANNOTATION_PREVIOUS_MIGRATION_BUNDLE: "",
+            },
         },
         "sha256:492fb9ae4e7e": {
             "schemaVersion": 2,
@@ -332,15 +338,9 @@ class TestMigrateTaskBundleUpgrade:
         else:
             cli_cmd = ["pmt", "migrate", "-u", json.dumps(tb_upgrades)]
 
-        if use_linked_migrations:
-            test_data = MockRegistry.test_data[0]
-            # Set annotation to link bundles that have migration
-            annotations = test_data.manifests["sha256:c4bb69a3a08f"]["annotations"]
-            annotations[ANNOTATION_PREVIOUS_MIGRATION_BUNDLE] = "sha256:f23dc7cd74ba"
-            annotations = test_data.manifests["sha256:f23dc7cd74ba"]["annotations"]
-            annotations[ANNOTATION_PREVIOUS_MIGRATION_BUNDLE] = ""
-            # Nothing change to the CLI command. Linked migrations are used by default.
-        else:
+        # Nothing change to the CLI command if using linked migrations.
+        # Linked migrations are used by default.
+        if not use_linked_migrations:
             cli_cmd.append("--use-legacy-resolver")
 
         monkeypatch.setattr("sys.argv", cli_cmd)

@@ -1,7 +1,7 @@
 import json
 import logging
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final
 
@@ -53,10 +53,16 @@ UPGRADES: Final = [
 @dataclass
 class ImageTestData:
     image: str
-    manifests: dict[str, dict]  # manifest digest => image manifest
-    referrers: dict[str, dict]  # manifest digest => image index
-    blobs: dict[str, bytes]  # layer digest => artifact content
-    tags: list[dict[str, str | int]]  # list of tags info
+    # manifest digest => image manifest
+    manifests: dict[str, dict] = field(default_factory=dict)
+    # manifest digest => image index
+    referrers: dict[str, dict] = field(default_factory=dict)
+    # layer digest => artifact content
+    blobs: dict[str, bytes] = field(default_factory=dict)
+    # list of tags info
+    tags: list[dict[str, str | int]] = field(default_factory=list)
+    # list of tag names for mocking listRepoTags endpoint to return []
+    nonexistent_tags: list[str] = field(default_factory=list)
 
 
 task_bundle_clone_test_data = ImageTestData(
@@ -200,6 +206,12 @@ task_bundle_clone_test_data = ImageTestData(
 )
 
 
+task_bundle_signature_scan_test_data = ImageTestData(
+    image=TASK_BUNDLE_SIGNATURE_SCAN,
+    nonexistent_tags=["0.2"],
+)
+
+
 # TODO: make this fixture to be reusable
 def mock_quay_list_tags(image_repo: str, tags: list[dict]) -> None:
     assert image_repo != ""
@@ -249,13 +261,14 @@ class MockRegistry(Registry):
 class TestMigrateTaskBundleUpgrade:
 
     def _mock_quay_list_tags(self):
-
         for image_data in MockRegistry.test_data:
             mock_list_repo_tags_with_filter_tag_name(image_data.image, image_data.tags)
 
         # Mock new tag scheme in bundle image repository, so no tag is retrieved for the version.
         mock_list_repo_tags_with_filter_tag_name(
-            TASK_BUNDLE_SIGNATURE_SCAN, [], empty_for_versions=["0.2"]
+            task_bundle_signature_scan_test_data.image,
+            [],
+            empty_for_versions=task_bundle_signature_scan_test_data.nonexistent_tags,
         )
 
     def _mock_pipeline_file(self, repo_path: Path, content: str) -> Path:

@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 
-set -eoxu pipefail
+set -o errexit
+set -o pipefail
+set -o nounset
+set -x
 
 if ! which gh >/dev/null 2>&1; then
     printf "GitHub CLI is required to run this script.\n"

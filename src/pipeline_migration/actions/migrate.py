@@ -104,6 +104,29 @@ class InvalidRenovateUpgradesData(ValueError):
     """Raise this error if any required data is missing in the given Renovate upgrades"""
 
 
+class MigrationResolveError(Exception):
+    def __init__(self, msg, bundle_upgrade: TaskBundleUpgrade, raw_exception: Exception) -> None:
+        super().__init__(msg)
+        self.bundle_upgrade = bundle_upgrade
+        self.raw_exception = raw_exception
+
+
+class MigrationApplyError(Exception):
+    def __init__(
+        self,
+        msg: str,
+        pipeline_file: str,
+        bundle_upgrade: TaskBundleUpgrade,
+        migration: TaskBundleMigration,
+        raw_exception: Exception,
+    ) -> None:
+        super().__init__(msg)
+        self.pipeline_file = pipeline_file
+        self.bundle_upgrade = bundle_upgrade
+        self.migration = migration
+        self.raw_exception = raw_exception
+
+
 def only_tags_pinned_by_version_revision(tags_info: Iterable[dict]) -> Generator[dict, Any, None]:
     regex = re.compile(TASK_TAG_REGEXP)
     for tag_info in tags_info:
@@ -303,11 +326,22 @@ class MigrationFileOperation(PipelineFileOperation):
         self._task_bundle_upgrades = task_bundle_upgrades
 
     def _apply_migration(self, file_path: FilePath) -> None:
+        """Apply migrations to a given pipeline file
+
+        All migrations are attempted against the given pipeline file even if some error occured.
+
+        :param file_path: file path to a pipeline file.
+        :type file_path: FilePath
+        :raises: ExceptionGroup[MigrationApplyError]. All errors captured during the process are
+            raised as a group at once. Every raw exception is wrapped inside MigrationApplyError.
+        """
         fd, migration_file = tempfile.mkstemp(suffix="-migration-file")
         prev_size = 0
-        try:
-            for task_bundle_upgrade in self._task_bundle_upgrades:
-                for migration in task_bundle_upgrade.migrations:
+        errors: list[Exception] = []
+
+        for bundle_upgrade in self._task_bundle_upgrades:
+            for migration in bundle_upgrade.migrations:
+                try:
                     logger.info(
                         "Apply migration of task bundle %s in package file %s",
                         migration.task_bundle,
@@ -325,9 +359,25 @@ class MigrationFileOperation(PipelineFileOperation):
                     proc = sp.run(cmd, stderr=sp.STDOUT, stdout=sp.PIPE)
                     logger.debug("%r", proc.stdout)
                     proc.check_returncode()
-        finally:
+                except Exception as e:
+                    err_msg = f"Failed to apply migration: {str(e)}"
+                    logger.error(err_msg)
+                    errors.append(
+                        MigrationApplyError(err_msg, str(file_path), bundle_upgrade, migration, e)
+                    )
+
+        try:
             os.close(fd)
             os.unlink(migration_file)
+        except Exception as e:
+            logger.warning(
+                "Unable to close and delete temporary migration script file %s: %s",
+                migration_file,
+                e,
+            )
+
+        if errors:
+            raise ExceptionGroup("Apply migrations errors", errors)
 
     def handle_pipeline_file(self, file_path: FilePath, loaded_doc: Any, style: YAMLStyle) -> None:
         yaml_style = style
@@ -410,12 +460,31 @@ class TaskBundleUpgradesManager:
         """Resolve migrations for given task bundle upgrades"""
         self._resolver.resolve(list(self._task_bundle_upgrades.values()))
 
-    def apply_migrations(self) -> None:
+    def apply_migrations(self, skip_bundles: list[str]) -> None:
+        """Apply migrations to package files
+
+        Before calling this method, migrations must be resolved in advance.
+
+        :param skip_bundles: Do not handle these given bundles, each of them is the bundle image
+            repository. Refer to Renovate template field ``depName``. Empty list means no bundle is
+            skipped.
+        :type skip_bundles: list[str] or None
+        :raises: ExceptionGroup
+        """
+        errors: list[Exception] = []
         for package_file in self.package_files:
-            if not os.path.exists(package_file.file_path):
-                raise ValueError(f"Pipeline file does not exist: {package_file.file_path}")
-            op = MigrationFileOperation(package_file.task_bundle_upgrades)
-            op.handle(package_file.file_path)
+            try:
+                if not os.path.exists(package_file.file_path):
+                    raise ValueError(f"Pipeline file does not exist: {package_file.file_path}")
+                bundle_upgrades = [
+                    u for u in package_file.task_bundle_upgrades if u.dep_name not in skip_bundles
+                ]
+                op = MigrationFileOperation(bundle_upgrades)
+                op.handle(package_file.file_path)
+            except Exception as e:
+                errors.append(e)
+        if errors:
+            raise ExceptionGroup("Migration apply errors", errors)
 
 
 class IncorrectMigrationAttachment(Exception):
@@ -467,8 +536,27 @@ def migrate(upgrades: list[dict[str, Any]], migration_resolver: type["Resolver"]
     :type upgrades: list[dict[str, any]]
     """
     manager = TaskBundleUpgradesManager(upgrades, migration_resolver)
-    manager.resolve_migrations()
-    manager.apply_migrations()
+    errors: list[ExceptionGroup] = []
+
+    try:
+        manager.resolve_migrations()
+    except ExceptionGroup as eg:
+        errors.append(eg)
+
+    skip_bundles: list[str] = []
+    if errors and (sg := errors[0].subgroup(MigrationResolveError)) is not None:
+        skip_bundles = [exc.bundle_upgrade.dep_name for exc in sg.exceptions]  # type: ignore
+
+    logger.warning("Failed to resolve migrations for bundles: %r", skip_bundles)
+    logger.warning("Do not attempt handling migrations for them.")
+
+    try:
+        manager.apply_migrations(skip_bundles=skip_bundles)
+    except ExceptionGroup as eg:
+        errors.append(eg)
+
+    if errors:
+        raise ExceptionGroup("migrate errors", errors)
 
 
 class Resolver(ABC):
@@ -485,7 +573,11 @@ class Resolver(ABC):
 
         Depending on the implementation of ``_resolve_migrations`` in subclasses, migrations are
         resolved from remote, i.e. Quay.io, and put into the ``TaskBundleUpgrade.migrations`` in
-        place. This method ensures the migrations is in order from oldest to newest.
+        place. This method ensures the migrations are in order from oldest to newest.
+
+        :raises: ExceptionGroup[MigrationResolveError]. Any error happening during resolving
+            migration for a specific upgrade is captured. Then, all such errors are grouped
+            into an ``ExceptionGroup`` instance.
         """
 
         def _resolve(tb_upgrade: TaskBundleUpgrade) -> None:
@@ -496,10 +588,26 @@ class Resolver(ABC):
             # Migrations must be applied in the reverse order.
             tb_upgrade.migrations.reverse()
 
+        errors: list[Exception] = []
+
         with ThreadPoolExecutor() as executor:
-            futures = [executor.submit(_resolve, tb_upgrade) for tb_upgrade in tb_upgrades]
+            futures = {
+                executor.submit(_resolve, tb_upgrade): tb_upgrade for tb_upgrade in tb_upgrades
+            }
             for future in as_completed(futures):
-                future.result()
+                try:
+                    future.result()
+                except Exception as e:
+                    bundle_upgrade = futures[future]
+                    err_msg = (
+                        "Error occurs when resolving migration for upgrade "
+                        f"from {bundle_upgrade.current_bundle} to {bundle_upgrade.new_bundle}"
+                    )
+                    logger.error(err_msg)
+                    errors.append(MigrationResolveError(f"{err_msg}: {str(e)}", bundle_upgrade, e))
+
+        if errors:
+            raise ExceptionGroup("Migration resolve errors", errors)
 
 
 class SimpleIterationResolver(Resolver):

@@ -12,9 +12,10 @@ from oras.types import container_type
 from pipeline_migration.cli import entry_point
 from pipeline_migration.actions.migrate import (
     ANNOTATION_HAS_MIGRATION,
+    ANNOTATION_IS_MIGRATION,
     ANNOTATION_PREVIOUS_MIGRATION_BUNDLE,
-    InvalidRenovateUpgradesData,
     clean_upgrades,
+    InvalidRenovateUpgradesData,
 )
 from pipeline_migration.registry import (
     Container,
@@ -178,7 +179,7 @@ task_bundle_clone_test_data = ImageTestData(
                     "size": 300,
                     "artifactType": "text/x-shellscript",
                     "annotations": {
-                        "dev.konflux-ci.task.migration": "true",
+                        ANNOTATION_IS_MIGRATION: "true",
                     },
                 },
             ],
@@ -193,7 +194,7 @@ task_bundle_clone_test_data = ImageTestData(
                     "size": 2048,
                     "artifactType": "text/x-shellscript",
                     "annotations": {
-                        "dev.konflux-ci.task.migration": "true",
+                        ANNOTATION_IS_MIGRATION: "true",
                     },
                 },
             ],

@@ -207,6 +207,20 @@ Post-release steps:
   (https://github.com/konflux-ci/mintmaker/blob/main/config/renovate/renovate.json) when necessary
   to use new command line interface.
 
+### Run script alternatively
+
+Executes commands in the following order to help making a release:
+
+```bash
+./hack/make-release.sh make_release_for_review version issue-key
+# Once pull request gets approved, it can be either merged via GitHub web UI or the following step
+./hack/make-release.sh merge_and_publish_release version
+```
+
+> [!NOTE]
+> If customization is required based on the auto-generated notes, please do manual release creation
+  via repository Releases page.
+
 ## License
 
 Copyright 2024.

@@ -4,6 +4,7 @@ from textwrap import dedent
 from pipeline_migration.actions.modify.task import (
     ModTaskAddParamOperation,
     ModTaskRemoveParamOperation,
+    TaskNotFoundError,
 )
 from pipeline_migration.utils import load_yaml, YAMLStyle
 
@@ -44,7 +45,39 @@ def pipeline_yaml_file(create_yaml_file):
                 name: test-runner
         """
     )
+    return create_yaml_file(content)
 
+
+@pytest.fixture
+def pipeline_finally_yaml_file(create_yaml_file):
+    """Create a temporary YAML file with a pipeline structure."""
+    content = dedent(
+        """\
+        apiVersion: tekton.dev/v1
+        kind: Pipeline
+        metadata:
+          name: test-pipeline
+        spec:
+          finally:
+            - name: clone
+              taskRef:
+                name: git-clone
+              params:
+                - name: url
+                  value: "https://github.com/example/repo"
+                - name: revision
+                  value: "main"
+            - name: build
+              taskRef:
+                name: buildah
+              params:
+                - name: IMAGE
+                  value: "registry.io/app:latest"
+            - name: test-task
+              taskRef:
+                name: test-runner
+        """
+    )
     return create_yaml_file(content)
 
 
@@ -60,6 +93,40 @@ def pipeline_run_yaml_file(create_yaml_file):
         spec:
           pipelineSpec:
             tasks:
+              - name: clone
+                taskRef:
+                  name: git-clone
+                params:
+                  - name: url
+                    value: "https://github.com/example/repo"
+              - name: build
+                taskRef:
+                  name: buildah
+              - name: deploy
+                taskRef:
+                  name: kubectl-deploy
+                params:
+                  - name: image
+                    value: "registry.io/app:latest"
+                  - name: namespace
+                    value: "production"
+        """
+    )
+    return create_yaml_file(content)
+
+
+@pytest.fixture
+def pipeline_run_finally_yaml_file(create_yaml_file):
+    """Create a temporary YAML file with a PipelineRun structure."""
+    content = dedent(
+        """\
+        apiVersion: tekton.dev/v1
+        kind: PipelineRun
+        metadata:
+          name: test-pipeline-run
+        spec:
+          pipelineSpec:
+            finally:
               - name: clone
                 taskRef:
                   name: git-clone
@@ -326,8 +393,8 @@ class TestModTaskAddParamOperation:
         tasks = loaded_doc["spec"]["tasks"]
 
         # Execute operation
-        result = op._add_param(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
-        assert result is False
+        with pytest.raises(TaskNotFoundError):
+            op._add_param(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
 
         expected = dedent(
             """\
@@ -442,6 +509,91 @@ class TestModTaskAddParamOperation:
         )
 
         assert read_file_content(pipeline_run_yaml_file) == expected
+
+    def test_handle_pipeline_file_finally(self, pipeline_finally_yaml_file):
+        """Test handle_pipeline_file method (with tasks in finally section)."""
+        op = ModTaskAddParamOperation("clone", "timeout", "30m")
+
+        loaded_doc = load_yaml(pipeline_finally_yaml_file)
+        style = YAMLStyle.detect(pipeline_finally_yaml_file)
+
+        # This should not raise an exception
+        op.handle_pipeline_file(pipeline_finally_yaml_file, loaded_doc, style)
+
+        expected = dedent(
+            """\
+            apiVersion: tekton.dev/v1
+            kind: Pipeline
+            metadata:
+              name: test-pipeline
+            spec:
+              finally:
+                - name: clone
+                  taskRef:
+                    name: git-clone
+                  params:
+                    - name: url
+                      value: "https://github.com/example/repo"
+                    - name: revision
+                      value: "main"
+                    - name: timeout
+                      value: 30m
+                - name: build
+                  taskRef:
+                    name: buildah
+                  params:
+                    - name: IMAGE
+                      value: "registry.io/app:latest"
+                - name: test-task
+                  taskRef:
+                    name: test-runner
+            """
+        )
+
+        assert read_file_content(pipeline_finally_yaml_file) == expected
+
+    def test_handle_pipeline_run_file_finally(self, pipeline_run_finally_yaml_file):
+        """Test handle_pipeline_run_file method (with tasks in finally section)."""
+        op = ModTaskAddParamOperation("clone", "timeout", "30m")
+
+        loaded_doc = load_yaml(pipeline_run_finally_yaml_file)
+        style = YAMLStyle.detect(pipeline_run_finally_yaml_file)
+
+        # This should not raise an exception
+        op.handle_pipeline_run_file(pipeline_run_finally_yaml_file, loaded_doc, style)
+
+        expected = dedent(
+            """\
+            apiVersion: tekton.dev/v1
+            kind: PipelineRun
+            metadata:
+              name: test-pipeline-run
+            spec:
+              pipelineSpec:
+                finally:
+                  - name: clone
+                    taskRef:
+                      name: git-clone
+                    params:
+                      - name: url
+                        value: "https://github.com/example/repo"
+                      - name: timeout
+                        value: 30m
+                  - name: build
+                    taskRef:
+                      name: buildah
+                  - name: deploy
+                    taskRef:
+                      name: kubectl-deploy
+                    params:
+                      - name: image
+                        value: "registry.io/app:latest"
+                      - name: namespace
+                        value: "production"
+            """
+        )
+
+        assert read_file_content(pipeline_run_finally_yaml_file) == expected
 
 
 class TestModTaskRemoveParamOperation:
@@ -590,8 +742,8 @@ class TestModTaskRemoveParamOperation:
         tasks = loaded_doc["spec"]["tasks"]
 
         # Execute operation
-        result = op._remove_param(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
-        assert result is False
+        with pytest.raises(TaskNotFoundError):
+            op._remove_param(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
 
         expected = dedent(
             """\
@@ -699,6 +851,83 @@ class TestModTaskRemoveParamOperation:
         )
 
         assert read_file_content(pipeline_run_yaml_file) == expected
+
+    def test_handle_pipeline_file_finally(self, pipeline_finally_yaml_file):
+        """Test handle_pipeline_file method (with tasks in finally section).."""
+        op = ModTaskRemoveParamOperation("clone", "url")
+
+        loaded_doc = load_yaml(pipeline_finally_yaml_file)
+        style = YAMLStyle.detect(pipeline_finally_yaml_file)
+
+        # This should not raise an exception
+        op.handle_pipeline_file(pipeline_finally_yaml_file, loaded_doc, style)
+
+        expected = dedent(
+            """\
+            apiVersion: tekton.dev/v1
+            kind: Pipeline
+            metadata:
+              name: test-pipeline
+            spec:
+              finally:
+                - name: clone
+                  taskRef:
+                    name: git-clone
+                  params:
+                    - name: revision
+                      value: "main"
+                - name: build
+                  taskRef:
+                    name: buildah
+                  params:
+                    - name: IMAGE
+                      value: "registry.io/app:latest"
+                - name: test-task
+                  taskRef:
+                    name: test-runner
+            """
+        )
+
+        assert read_file_content(pipeline_finally_yaml_file) == expected
+
+    def test_handle_pipeline_run_file_finally(self, pipeline_run_finally_yaml_file):
+        """Test handle_pipeline_run_file method (with tasks in finally section).."""
+        op = ModTaskRemoveParamOperation("deploy", "namespace")
+
+        loaded_doc = load_yaml(pipeline_run_finally_yaml_file)
+        style = YAMLStyle.detect(pipeline_run_finally_yaml_file)
+
+        # This should not raise an exception
+        op.handle_pipeline_run_file(pipeline_run_finally_yaml_file, loaded_doc, style)
+
+        expected = dedent(
+            """\
+            apiVersion: tekton.dev/v1
+            kind: PipelineRun
+            metadata:
+              name: test-pipeline-run
+            spec:
+              pipelineSpec:
+                finally:
+                  - name: clone
+                    taskRef:
+                      name: git-clone
+                    params:
+                      - name: url
+                        value: "https://github.com/example/repo"
+                  - name: build
+                    taskRef:
+                      name: buildah
+                  - name: deploy
+                    taskRef:
+                      name: kubectl-deploy
+                    params:
+                      - name: image
+                        value: "registry.io/app:latest"
+            """
+        )
+
+        assert read_file_content(pipeline_run_finally_yaml_file) == expected
 
 
 class TestComplexScenarios:

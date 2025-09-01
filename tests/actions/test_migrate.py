@@ -18,6 +18,7 @@ from pipeline_migration.actions.migrate import (
     ANNOTATION_HAS_MIGRATION,
     ANNOTATION_IS_MIGRATION,
     ANNOTATION_TRUTH_VALUE,
+    MigrationApplyError,
     determine_task_bundle_upgrades_range,
     fetch_migration_file,
     IncorrectMigrationAttachment,
@@ -54,7 +55,7 @@ TASK_BUNDLE_SIGNATURE_SCAN: Final = "quay.io/konflux-ci/some-catalog/task-signat
 
 
 def mock_list_repo_tags_with_filter_tag_name(
-    image: str, tags_info: list[dict], empty_for_versions: list[str] | None = None
+    image: str, tags_info: list[dict], empty_for_versions: list[str] | None = None, status=200
 ) -> None:
     c = Container(image)
     api_url = f"https://quay.io/api/v1/repository/{c.api_prefix}/tag/"
@@ -69,6 +70,7 @@ def mock_list_repo_tags_with_filter_tag_name(
         responses.get(
             f"{api_url}?page=1&onlyActiveTags=true&filter_tag_name=like:{version}-",
             json={"tags": its_tags, "page": 1, "has_additional": False},
+            status=status,
         )
 
 
@@ -621,9 +623,10 @@ class TestMigrationFileOperationHandlePipelineFile:
 
         monkeypatch.chdir(tmp_path)
         op = MigrationFileOperation(self.package_file.task_bundle_upgrades)
-        with pytest.raises(subprocess.CalledProcessError):
+        with pytest.raises(ExceptionGroup) as exc_info:
             op.handle(self.package_file.file_path)
 
+        assert exc_info.group_contains(MigrationApplyError, match="Command .+ returned non-zero")
         assert "something is wrong" in caplog.text
 
 

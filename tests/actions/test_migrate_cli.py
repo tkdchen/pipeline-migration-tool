@@ -1,8 +1,10 @@
 import itertools
 import json
 import logging
+import os
+import re
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final
 
@@ -13,9 +15,10 @@ from oras.types import container_type
 from pipeline_migration.cli import entry_point
 from pipeline_migration.actions.migrate import (
     ANNOTATION_HAS_MIGRATION,
+    ANNOTATION_IS_MIGRATION,
     ANNOTATION_PREVIOUS_MIGRATION_BUNDLE,
-    InvalidRenovateUpgradesData,
     clean_upgrades,
+    InvalidRenovateUpgradesData,
 )
 from pipeline_migration.registry import (
     Container,
@@ -31,6 +34,7 @@ from pipeline_migration.utils import YAMLStyle, load_yaml, dump_yaml
 from tests.actions.test_migrate import (
     APP_IMAGE_REPO,
     TASK_BUNDLE_CLONE,
+    TASK_BUNDLE_LINT,
     TASK_BUNDLE_SIGNATURE_SCAN,
     mock_list_repo_tags_with_filter_tag_name,
 )
@@ -54,13 +58,38 @@ UPGRADES: Final = [
 @dataclass
 class ImageTestData:
     image: str
-    manifests: dict[str, dict]  # manifest digest => image manifest
-    referrers: dict[str, dict]  # manifest digest => image index
-    blobs: dict[str, bytes]  # layer digest => artifact content
+    # manifest digest => image manifest
+    manifests: dict[str, dict] = field(default_factory=dict)
+    # manifest digest => image index
+    referrers: dict[str, dict] = field(default_factory=dict)
+    # layer digest => artifact content
+    blobs: dict[str, bytes] = field(default_factory=dict)
+    # list of tags info
+    tags: list[dict[str, str | int]] = field(default_factory=list)
+    # list of tag names for mocking listRepoTags endpoint to return []
+    nonexistent_tags: list[str] = field(default_factory=list)
 
 
 task_bundle_clone_test_data = ImageTestData(
     image=TASK_BUNDLE_CLONE,
+    # For mocking listRepoTags endpoint. They are mapped to the following bundle manifests.
+    tags=[
+        {
+            "name": f"0.1-{generate_git_sha()}",
+            "manifest_digest": "sha256:c4bb69a3a08f",
+            "start_ts": 3,
+        },
+        {
+            "name": f"0.1-{generate_git_sha()}",
+            "manifest_digest": "sha256:f23dc7cd74ba",
+            "start_ts": 2,
+        },
+        {
+            "name": f"0.1-{generate_git_sha()}",
+            "manifest_digest": "sha256:492fb9ae4e7e",
+            "start_ts": 1,
+        },
+    ],
     manifests={
         # Task bundles, which are listed from newer one to older one.
         "sha256:c4bb69a3a08f": {
@@ -72,7 +101,10 @@ task_bundle_clone_test_data = ImageTestData(
                 "size": 10,
             },
             "layers": [],
-            "annotations": {ANNOTATION_HAS_MIGRATION: "true"},
+            "annotations": {
+                ANNOTATION_HAS_MIGRATION: "true",
+                ANNOTATION_PREVIOUS_MIGRATION_BUNDLE: "sha256:f23dc7cd74ba",
+            },
         },
         "sha256:f23dc7cd74ba": {
             "schemaVersion": 2,
@@ -83,7 +115,10 @@ task_bundle_clone_test_data = ImageTestData(
                 "size": 11,
             },
             "layers": [],
-            "annotations": {ANNOTATION_HAS_MIGRATION: "true"},
+            "annotations": {
+                ANNOTATION_HAS_MIGRATION: "true",
+                ANNOTATION_PREVIOUS_MIGRATION_BUNDLE: "",
+            },
         },
         "sha256:492fb9ae4e7e": {
             "schemaVersion": 2,
@@ -148,7 +183,7 @@ task_bundle_clone_test_data = ImageTestData(
                     "size": 300,
                     "artifactType": "text/x-shellscript",
                     "annotations": {
-                        "dev.konflux-ci.task.migration": "true",
+                        ANNOTATION_IS_MIGRATION: "true",
                     },
                 },
             ],
@@ -163,7 +198,7 @@ task_bundle_clone_test_data = ImageTestData(
                     "size": 2048,
                     "artifactType": "text/x-shellscript",
                     "annotations": {
-                        "dev.konflux-ci.task.migration": "true",
+                        ANNOTATION_IS_MIGRATION: "true",
                     },
                 },
             ],
@@ -172,6 +207,100 @@ task_bundle_clone_test_data = ImageTestData(
     blobs={
         "sha256:2fed5ba": b"echo add a new task",
         "sha256:cf505b9": b"echo remove params from task",
+    },
+)
+
+
+task_bundle_signature_scan_test_data = ImageTestData(
+    image=TASK_BUNDLE_SIGNATURE_SCAN,
+    nonexistent_tags=["0.2"],
+    tags=[
+        {
+            "name": f"0.1-{generate_git_sha()}",
+            "manifest_digest": "sha256:73d377b90ce9",
+            "start_ts": 3,
+        },
+        {
+            "name": f"0.1-{generate_git_sha()}",
+            "manifest_digest": "sha256:47e71534faa0",
+            "start_ts": 2,
+        },
+    ],
+    manifests={
+        "sha256:73d377b90ce9": {
+            "schemaVersion": 2,
+            "mediaType": MEDIA_TYPE_OCI_IMAGE_MANIFEST_V1,
+            "config": {
+                "mediaType": MEDIA_TYPE_OCI_IMAGE_CONFIG_V1,
+                "digest": generate_digest(),
+                "size": 10,
+            },
+            "layers": [],
+            "annotations": {
+                ANNOTATION_HAS_MIGRATION: "false",
+                ANNOTATION_PREVIOUS_MIGRATION_BUNDLE: "",
+            },
+        },
+        "sha256:47e71534faa0": {
+            "schemaVersion": 2,
+            "mediaType": MEDIA_TYPE_OCI_IMAGE_MANIFEST_V1,
+            "config": {
+                "mediaType": MEDIA_TYPE_OCI_IMAGE_CONFIG_V1,
+                "digest": generate_digest(),
+                "size": 10,
+            },
+            "layers": [],
+            "annotations": {
+                ANNOTATION_HAS_MIGRATION: "false",
+                ANNOTATION_PREVIOUS_MIGRATION_BUNDLE: "",
+            },
+        },
+    },
+)
+
+task_bundle_lint_test_data = ImageTestData(
+    image=TASK_BUNDLE_LINT,
+    tags=[
+        {
+            "name": f"0.2-{generate_git_sha()}",
+            "manifest_digest": "sha256:332a23017229",
+            "start_ts": 3,
+        },
+        {
+            "name": f"0.1-{generate_git_sha()}",
+            "manifest_digest": "sha256:6f8c6c736970",
+            "start_ts": 2,
+        },
+    ],
+    manifests={
+        "sha256:332a23017229": {
+            "schemaVersion": 2,
+            "mediaType": MEDIA_TYPE_OCI_IMAGE_MANIFEST_V1,
+            "config": {
+                "mediaType": MEDIA_TYPE_OCI_IMAGE_CONFIG_V1,
+                "digest": generate_digest(),
+                "size": 10,
+            },
+            "layers": [],
+            "annotations": {
+                ANNOTATION_HAS_MIGRATION: "false",
+                ANNOTATION_PREVIOUS_MIGRATION_BUNDLE: "",
+            },
+        },
+        "sha256:6f8c6c736970": {
+            "schemaVersion": 2,
+            "mediaType": MEDIA_TYPE_OCI_IMAGE_MANIFEST_V1,
+            "config": {
+                "mediaType": MEDIA_TYPE_OCI_IMAGE_CONFIG_V1,
+                "digest": generate_digest(),
+                "size": 10,
+            },
+            "layers": [],
+            "annotations": {
+                ANNOTATION_HAS_MIGRATION: "false",
+                ANNOTATION_PREVIOUS_MIGRATION_BUNDLE: "",
+            },
+        },
     },
 )
 
@@ -188,7 +317,11 @@ def mock_quay_list_tags(image_repo: str, tags: list[dict]) -> None:
 
 class MockRegistry(Registry):
 
-    test_data = [task_bundle_clone_test_data]
+    test_data = [
+        task_bundle_clone_test_data,
+        task_bundle_lint_test_data,
+        task_bundle_signature_scan_test_data,
+    ]
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -215,6 +348,8 @@ class MockRegistry(Registry):
     ) -> dict:
         """Override Registry.get_manifest to get manifest from test data"""
         for image_data in self.test_data:
+            if image_data.image != f"{container.registry}/{container.api_prefix}":
+                continue
             manifest = image_data.manifests.get(container.digest)
             if manifest is None:
                 raise ValueError(f"Digest {container.digest} does not present in the test data.")
@@ -224,28 +359,20 @@ class MockRegistry(Registry):
 
 class TestMigrateTaskBundleUpgrade:
 
-    def _mock_quay_list_tags(self):
-
+    def _mock_quay_list_tags(self, bad_gateway_for: list[str] | None = None):
+        set_503_for = bad_gateway_for or []
         for image_data in MockRegistry.test_data:
-            timestamp_gen = itertools.count(len(image_data.manifests), -1)
-            tags = [
-                {
-                    "name": f"0.1-{generate_git_sha()}",
-                    "manifest_digest": digest,
-                    "start_ts": next(timestamp_gen),
-                }
-                for digest, manifest_json in image_data.manifests.items()
-                if manifest_json["config"]["mediaType"] == MEDIA_TYPE_OCI_IMAGE_CONFIG_V1
-            ]
-            # c = Container(image_data.image)
-            # mock_quay_list_tags(c.api_prefix, tags)
-
-            mock_list_repo_tags_with_filter_tag_name(image_data.image, tags)
-
-        # Mock new tag scheme in bundle image repository, so no tag is retrieved for the version.
-        mock_list_repo_tags_with_filter_tag_name(
-            TASK_BUNDLE_SIGNATURE_SCAN, [], empty_for_versions=["0.2"]
-        )
+            response_status = 503 if image_data.image in set_503_for else 200
+            mock_list_repo_tags_with_filter_tag_name(
+                image_data.image, image_data.tags, status=response_status
+            )
+            if image_data.nonexistent_tags:
+                mock_list_repo_tags_with_filter_tag_name(
+                    image_data.image,
+                    [],
+                    empty_for_versions=image_data.nonexistent_tags,
+                    status=response_status,
+                )
 
     def _mock_pipeline_file(self, repo_path: Path, content: str) -> Path:
         tekton_dir = repo_path / ".tekton"
@@ -332,15 +459,9 @@ class TestMigrateTaskBundleUpgrade:
         else:
             cli_cmd = ["pmt", "migrate", "-u", json.dumps(tb_upgrades)]
 
-        if use_linked_migrations:
-            test_data = MockRegistry.test_data[0]
-            # Set annotation to link bundles that have migration
-            annotations = test_data.manifests["sha256:c4bb69a3a08f"]["annotations"]
-            annotations[ANNOTATION_PREVIOUS_MIGRATION_BUNDLE] = "sha256:f23dc7cd74ba"
-            annotations = test_data.manifests["sha256:f23dc7cd74ba"]["annotations"]
-            annotations[ANNOTATION_PREVIOUS_MIGRATION_BUNDLE] = ""
-            # Nothing change to the CLI command. Linked migrations are used by default.
-        else:
+        # Nothing change to the CLI command if using linked migrations.
+        # Linked migrations are used by default.
+        if not use_linked_migrations:
             cli_cmd.append("--use-legacy-resolver")
 
         monkeypatch.setattr("sys.argv", cli_cmd)
@@ -411,6 +532,108 @@ class TestMigrateTaskBundleUpgrade:
         package_file = upgrades[0]["packageFile"]
         log_msg = f"Pipeline file does not exist: {package_file}"
         assert log_msg in caplog.text
+
+    @responses.activate
+    def test_continue_proceeding_even_if_error_occurs(
+        self, caplog, monkeypatch, tmp_path, component_a_repo
+    ) -> None:
+        """Test continue proceeding migrations for upgrades even if error occurs
+
+        Run pmt for three task bundle upgrades. There are failures of requesting Quay.io
+        listRepoTags endpoint and migration script failure. The expected result is:
+
+        * Migrations are resolved for the all upgrades.
+        * All migrations are attemped for bundle lint.
+        """
+
+        caplog.set_level(logging.DEBUG)
+        monkeypatch.setattr("pipeline_migration.actions.migrate.Registry", MockRegistry)
+
+        package_file = component_a_repo.tekton_dir / "push.yaml"
+        bundle_upgrades = [
+            {
+                "depName": TASK_BUNDLE_CLONE,
+                "currentValue": "0.1",
+                "currentDigest": "sha256:492fb9ae4e7e",
+                "newValue": "0.1",
+                "newDigest": "sha256:c4bb69a3a08f",
+                "depTypes": ["tekton-bundle"],
+                "packageFile": str(package_file),
+                "parentDir": package_file.parent.name,
+            },
+            {
+                "depName": TASK_BUNDLE_LINT,
+                "currentValue": "0.1",
+                "currentDigest": "sha256:6f8c6c736970",
+                "newValue": "0.2",
+                "newDigest": "sha256:332a23017229",
+                "depTypes": ["tekton-bundle"],
+                "packageFile": str(package_file),
+                "parentDir": package_file.parent.name,
+            },
+            {
+                "depName": TASK_BUNDLE_SIGNATURE_SCAN,
+                "currentValue": "0.1",
+                "currentDigest": "sha256:47e71534faa0",
+                "newValue": "0.1",
+                "newDigest": "sha256:73d377b90ce9",
+                "depTypes": ["tekton-bundle"],
+                "packageFile": str(package_file),
+                "parentDir": package_file.parent.name,
+            },
+        ]
+
+        # make failure for lint
+        self._mock_quay_list_tags(bad_gateway_for=[TASK_BUNDLE_LINT])
+
+        # make failure for clone
+        counter = itertools.count()
+
+        def _mkstemp(*args, **kwargs):
+            tmp_file_path = tmp_path / f"temp-file-{next(counter)}"
+            tmp_file_path.write_text("")
+            fd = os.open(tmp_file_path, os.O_RDWR)
+            return fd, tmp_file_path
+
+        # Refer to the test data
+        first_migration_to_run: Final = b"echo remove params from task"
+
+        def subprocess_run(cmd, *args, **kwargs):
+            assert not kwargs.get("check")
+            content = open(cmd[1], "r").read().encode()
+
+            if content == first_migration_to_run:
+                # only fail the first migration of clone task
+                return subprocess.CompletedProcess(cmd, 1, stdout="normal output")
+
+            # Output the content to ease assertion
+            return subprocess.CompletedProcess(cmd, 0, stdout=f"migration: {content.decode()}")
+
+        monkeypatch.setattr("tempfile.mkstemp", _mkstemp)
+        monkeypatch.setattr("subprocess.run", subprocess_run)
+
+        cli_cmd = ["pmt", "migrate", "-u", json.dumps(bundle_upgrades)]
+        monkeypatch.setattr("sys.argv", cli_cmd)
+
+        assert entry_point() == 1
+
+        captured_logs = caplog.text
+        assert re.search(r"Command .+ returned non-zero exit status", captured_logs)
+
+        # lint task is handled but failed to resolve migrations
+        log_msg = "503 Server Error: Service Unavailable for url"
+        assert log_msg in captured_logs
+        assert (
+            next(counter) == 2
+        ), "_apply_migration should only be called twice for tasks clone and signature-scan."
+
+        # clone task is handled
+        # Failed to apply the first migration, the others are attempted.
+        assert "echo add a new task" in captured_logs
+
+        # signature-scan task is handled
+        msg_regex = rf"Migration search stops at {TASK_BUNDLE_SIGNATURE_SCAN}"
+        assert re.search(msg_regex, captured_logs)
 
 
 def test_entry_point_should_catch_error(monkeypatch, caplog):

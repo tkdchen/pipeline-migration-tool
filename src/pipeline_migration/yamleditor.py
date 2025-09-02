@@ -213,6 +213,12 @@ class EditYAMLEntry:
 
         # removing from the node position
         lineno = last_node.lc.line
+
+        # in case of preceding empty lines or comments, we have to remove them as well
+        if last_node.ca.comment:
+            # getting first empty line/comment
+            lineno = last_node.ca.comment[1][0].start_mark.line
+
         if self._is_parent_dict(path_stack):
             # to also remove dict key, we have to do -1 in lineno
             lineno = max(lineno - 1, 0)

@@ -8,6 +8,9 @@ from pipeline_migration.yamleditor import (
     EditYAMLEntry,
     EOF,
 )
+from pipeline_migration.utils import (
+    load_yaml,
+)
 
 
 @pytest.fixture
@@ -792,6 +795,211 @@ class TestEditYAMLEntry:
         editor = EditYAMLEntry(get_next_entry_test_yaml_file)
         path_stack = editor._get_path_stack(yaml_path)
         assert editor._get_next_entry_line(path_stack) == expected_lineno
+
+
+class TestEditYAMLEntryComments:
+    """Tests to make sure comments are preserved"""
+
+    @pytest.fixture
+    def comments_yaml_file(self, create_yaml_file):
+        content = dedent(
+            """\
+            spec:
+                tasks:
+                # comment line
+                - name: init
+                  params:
+                    # comment as first line in array, data follows
+                    - name: image-url
+                      value: image  # inline comment
+
+                    - name: rebuild
+                      # comment between keys
+                      value: $(params.rebuild)
+
+                - name: build # build code
+                # comment first, no data follows
+
+                - name: test
+                    # indented comment between keys
+                  data: ["line1", {name: value}]
+            """
+        )
+        return create_yaml_file(content)
+
+    def test_insert_into_empty_commented_section(self, comments_yaml_file):
+        editor = EditYAMLEntry(comments_yaml_file)
+
+        new_item = {"params": [{"name": "test", "value": 999}]}
+        editor.insert(["spec", "tasks", 1], new_item)
+
+        expected = dedent(
+            """\
+            spec:
+                tasks:
+                # comment line
+                - name: init
+                  params:
+                    # comment as first line in array, data follows
+                    - name: image-url
+                      value: image  # inline comment
+
+                    - name: rebuild
+                      # comment between keys
+                      value: $(params.rebuild)
+
+                - name: build # build code
+                # comment first, no data follows
+
+                  params:
+                  - name: test
+                    value: 999
+                - name: test
+                    # indented comment between keys
+                  data: ["line1", {name: value}]
+            """
+        )
+        assert read_file_content(comments_yaml_file) == expected
+
+    def test_insert_into_non_empty_commented_section(self, comments_yaml_file):
+        editor = EditYAMLEntry(comments_yaml_file)
+
+        new_item = {"params": [{"name": "test", "value": 999}]}
+        editor.insert(["spec", "tasks", 2], new_item)
+
+        expected = dedent(
+            """\
+            spec:
+                tasks:
+                # comment line
+                - name: init
+                  params:
+                    # comment as first line in array, data follows
+                    - name: image-url
+                      value: image  # inline comment
+
+                    - name: rebuild
+                      # comment between keys
+                      value: $(params.rebuild)
+
+                - name: build # build code
+                # comment first, no data follows
+
+                - name: test
+                    # indented comment between keys
+                  data: ["line1", {name: value}]
+                  params:
+                  - name: test
+                    value: 999
+            """
+        )
+        assert read_file_content(comments_yaml_file) == expected
+
+    def test_delete_array_item_with_comments(self, comments_yaml_file):
+        editor = EditYAMLEntry(comments_yaml_file)
+
+        editor.delete(["spec", "tasks", 0])
+
+        expected = dedent(
+            """\
+            spec:
+                tasks:
+                # comment line
+                - name: build # build code
+                # comment first, no data follows
+
+                - name: test
+                    # indented comment between keys
+                  data: ["line1", {name: value}]
+            """
+        )
+        assert read_file_content(comments_yaml_file) == expected
+
+    def test_delete_object_item_with_comments(self, comments_yaml_file):
+        editor = EditYAMLEntry(comments_yaml_file)
+
+        editor.delete(["spec", "tasks", 0, "params"])
+
+        expected = dedent(
+            """\
+            spec:
+                tasks:
+                # comment line
+                - name: init
+                - name: build # build code
+                # comment first, no data follows
+
+                - name: test
+                    # indented comment between keys
+                  data: ["line1", {name: value}]
+            """
+        )
+        assert read_file_content(comments_yaml_file) == expected
+
+    @pytest.mark.xfail(reason="known issue that inline comment doesn't keep indentation")
+    def test_replace_value_with_inline_comment(self, comments_yaml_file):
+        editor = EditYAMLEntry(comments_yaml_file)
+
+        # of course by just adding a stdlib new dict, comments wouldn't be kept
+        # instead of that use existing ruamel object and update value
+        d = load_yaml(comments_yaml_file)
+        replace = d["spec"]["tasks"][0]["params"][0]
+        replace["value"] = "replaced"
+        editor.replace(["spec", "tasks", 0, "params", 0], replace)
+
+        expected = dedent(
+            """\
+            spec:
+                tasks:
+                # comment line
+                - name: init
+                  params:
+                    # comment as first line in array, data follows
+                    - name: image-url
+                      value: replaced  # inline comment
+
+                    - name: rebuild
+                      # comment between keys
+                      value: $(params.rebuild)
+
+                - name: build # build code
+                # comment first, no data follows
+
+                - name: test
+                    # indented comment between keys
+                  data: ["line1", {name: value}]
+            """
+        )
+        assert read_file_content(comments_yaml_file) == expected
+
+    def test_replace_empty_commented_section(self, comments_yaml_file):
+        editor = EditYAMLEntry(comments_yaml_file)
+
+        new_item = {"name": "test-replaced"}
+        editor.replace(["spec", "tasks", 1], new_item)
+
+        expected = dedent(
+            """\
+            spec:
+                tasks:
+                # comment line
+                - name: init
+                  params:
+                    # comment as first line in array, data follows
+                    - name: image-url
+                      value: image  # inline comment
+
+                    - name: rebuild
+                      # comment between keys
+                      value: $(params.rebuild)
+
+                - name: test-replaced
+                - name: test
+                    # indented comment between keys
+                  data: ["line1", {name: value}]
+            """
+        )
+        assert read_file_content(comments_yaml_file) == expected
 
 
 class TestEditYAMLEntryFlowStyle:

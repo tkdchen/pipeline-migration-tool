@@ -130,6 +130,43 @@ the same with `pmt modify`:
 Get more information about supported resources by `pmt modify -h`, and supported commands
 for the given resource by `pmt modify RESOURCE -h` (for example `pmt modify task -h`).
 
+#### Known issues
+
+Subcommand `modify` has following known issues
+
+* Indentation of inline comment may not be preserved when value on the same line us updated
+Example when value change:
+
+```yaml
+key: value  # comment
+```
+
+```yaml
+key: replaced-value      # comment
+```
+
+* YAML Flow style has limited support, to ensure safe modification,
+ flow style will be regenerated to block style on affected keys.
+
+For example, adding item `{"item": "test"}` into flow style list:
+
+```yaml
+---
+start:
+  flow: [{item: one, ...}, {item: two, ...}]
+```
+
+will result into:
+
+```yaml
+---
+start:
+  flow:
+  - {item: one, ...}
+  - {item: two, ...}
+  - item: test
+```
+
 ## Run tests
 
 ```bash

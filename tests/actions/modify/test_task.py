@@ -169,7 +169,7 @@ class TestModTaskAddParamOperation:
         tasks = loaded_doc["spec"]["tasks"]
 
         # Execute operation
-        result = op._add_param(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
+        result = op._do_action(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
         assert result is True
 
         expected = dedent(
@@ -214,7 +214,7 @@ class TestModTaskAddParamOperation:
         tasks = loaded_doc["spec"]["tasks"]
 
         # Execute operation
-        result = op._add_param(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
+        result = op._do_action(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
         assert result is True
 
         expected = dedent(
@@ -260,7 +260,7 @@ class TestModTaskAddParamOperation:
         tasks = loaded_doc["spec"]["tasks"]
 
         # Execute operation
-        result = op._add_param(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
+        result = op._do_action(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
         assert result is True
 
         expected = dedent(
@@ -305,7 +305,7 @@ class TestModTaskAddParamOperation:
         tasks = loaded_doc["spec"]["tasks"]
 
         # Execute operation
-        result = op._add_param(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
+        result = op._do_action(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
         assert result is True
 
         expected = dedent(
@@ -350,7 +350,7 @@ class TestModTaskAddParamOperation:
         tasks = loaded_doc["spec"]["tasks"]
 
         # Execute operation
-        result = op._add_param(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
+        result = op._do_action(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
         assert result is False  # No change needed
 
         expected = dedent(
@@ -394,7 +394,7 @@ class TestModTaskAddParamOperation:
 
         # Execute operation
         with pytest.raises(TaskNotFoundError):
-            op._add_param(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
+            op._do_action(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
 
         expected = dedent(
             """\
@@ -615,7 +615,7 @@ class TestModTaskRemoveParamOperation:
         tasks = loaded_doc["spec"]["tasks"]
 
         # Execute operation
-        result = op._remove_param(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
+        result = op._do_action(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
         assert result is True
 
         expected = dedent(
@@ -656,7 +656,7 @@ class TestModTaskRemoveParamOperation:
         tasks = loaded_doc["spec"]["tasks"]
 
         # Execute operation
-        result = op._remove_param(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
+        result = op._do_action(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
         assert result is False
 
         expected = dedent(
@@ -699,7 +699,7 @@ class TestModTaskRemoveParamOperation:
         tasks = loaded_doc["spec"]["tasks"]
 
         # Execute operation
-        result = op._remove_param(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
+        result = op._do_action(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
         assert result is False
 
         expected = dedent(
@@ -743,7 +743,7 @@ class TestModTaskRemoveParamOperation:
 
         # Execute operation
         with pytest.raises(TaskNotFoundError):
-            op._remove_param(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
+            op._do_action(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
 
         expected = dedent(
             """\
@@ -940,14 +940,14 @@ class TestComplexScenarios:
         loaded_doc = load_yaml(pipeline_yaml_file)
         style = YAMLStyle.detect(pipeline_yaml_file)
         tasks = loaded_doc["spec"]["tasks"]
-        result1 = op1._add_param(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
+        result1 = op1._do_action(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
         assert result1 is True
 
         # Add second parameter
         op2 = ModTaskAddParamOperation("clone", "depth", "1")
         loaded_doc = load_yaml(pipeline_yaml_file)
         tasks = loaded_doc["spec"]["tasks"]
-        result2 = op2._add_param(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
+        result2 = op2._do_action(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
         assert result2 is True
 
         expected = dedent(
@@ -991,14 +991,14 @@ class TestComplexScenarios:
         loaded_doc = load_yaml(pipeline_yaml_file)
         style = YAMLStyle.detect(pipeline_yaml_file)
         tasks = loaded_doc["spec"]["tasks"]
-        result_add = op_add._add_param(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
+        result_add = op_add._do_action(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
         assert result_add is True
 
         # Remove parameter
         op_remove = ModTaskRemoveParamOperation("clone", "timeout")
         loaded_doc = load_yaml(pipeline_yaml_file)
         tasks = loaded_doc["spec"]["tasks"]
-        result_remove = op_remove._remove_param(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
+        result_remove = op_remove._do_action(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
         assert result_remove is True
 
         expected = dedent(
@@ -1038,21 +1038,21 @@ class TestComplexScenarios:
         loaded_doc = load_yaml(pipeline_yaml_file)
         style = YAMLStyle.detect(pipeline_yaml_file)
         tasks = loaded_doc["spec"]["tasks"]
-        result1 = op1._add_param(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
+        result1 = op1._do_action(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
         assert result1 is True
 
         # Add param to build task
         op2 = ModTaskAddParamOperation("build", "CONTEXT", "./")
         loaded_doc = load_yaml(pipeline_yaml_file)
         tasks = loaded_doc["spec"]["tasks"]
-        result2 = op2._add_param(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
+        result2 = op2._do_action(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
         assert result2 is True
 
         # Remove param from build task
         op3 = ModTaskRemoveParamOperation("build", "IMAGE")
         loaded_doc = load_yaml(pipeline_yaml_file)
         tasks = loaded_doc["spec"]["tasks"]
-        result3 = op3._remove_param(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
+        result3 = op3._do_action(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
         assert result3 is True
 
         expected = dedent(

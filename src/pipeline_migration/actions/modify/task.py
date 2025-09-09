@@ -1,3 +1,4 @@
+from abc import abstractmethod
 import argparse
 import copy
 from enum import Enum
@@ -56,6 +57,69 @@ class TaskNotFoundError(Exception):
     """Task of the given name not found"""
 
 
+class TaskBase(PipelineFileOperation):
+    """Base class for task handling"""
+
+    def __init__(self, task_name):
+        super().__init__()
+        self.task_name = task_name
+
+    @abstractmethod
+    def _do_action(
+        self, tasks: CommentedSeq, path_prefix: YAMLPath, pipeline_file: FilePath, style: YAMLStyle
+    ):
+        """Method where the real YAML change is happening"""
+        raise NotImplementedError
+
+    def handle_pipeline_file(self, file_path: FilePath, loaded_doc: Any, style: YAMLStyle) -> None:
+        yaml_paths = [
+            ["spec", "tasks"],
+            ["spec", "finally"],
+        ]
+        self._handle_paths(yaml_paths, file_path, loaded_doc, style)
+
+    def handle_pipeline_run_file(
+        self, file_path: FilePath, loaded_doc: Any, style: YAMLStyle
+    ) -> None:
+        yaml_paths = [
+            ["spec", "pipelineSpec", "tasks"],
+            ["spec", "pipelineSpec", "finally"],
+        ]
+        self._handle_paths(yaml_paths, file_path, loaded_doc, style)
+
+    def _handle_paths(
+        self, yaml_paths: List[List[str]], file_path: FilePath, loaded_doc: Any, style: YAMLStyle
+    ):
+        not_found_task = [False] * len(yaml_paths)
+
+        def get_path_doc(ypath):
+            """:raises KeyError: when path doesn't exist"""
+            tmp_doc = copy.copy(loaded_doc)
+            for p in ypath:
+                tmp_doc = tmp_doc[p]
+            return tmp_doc
+
+        for index, yaml_path in enumerate(yaml_paths):
+            # check if path exist
+            try:
+                tmp_doc = get_path_doc(yaml_path)
+            except KeyError:
+                not_found_task[index] = True
+                continue
+
+            try:
+                self._do_action(tmp_doc, yaml_path, file_path, style)
+            except TaskNotFoundError:
+                not_found_task[index] = True
+
+        if all(not_found_task):
+            logger.warning(
+                "task '%s' does not exist in '%s'",
+                self.task_name,
+                file_path,
+            )
+
+
 def register_cli(subparser) -> None:
     mod_task_parser = subparser.add_parser(
         "task",
@@ -104,66 +168,18 @@ def register_cli(subparser) -> None:
     subparser_remove_param.set_defaults(action=action_remove_param)
 
 
-class ModTaskAddParamOperation(PipelineFileOperation):
+class ModTaskAddParamOperation(TaskBase):
     def __init__(
         self,
         task_name: str,
         param_name: str,
         param_value: str | List[str],
     ) -> None:
-        self.task_name = task_name
+        super().__init__(task_name)
         self.param_name = param_name
         self.param_value = param_value
 
-    def handle_pipeline_file(self, file_path: FilePath, loaded_doc: Any, style: YAMLStyle) -> None:
-        yaml_paths = [
-            ["spec", "tasks"],
-            ["spec", "finally"],
-        ]
-        self._handle_paths(yaml_paths, file_path, loaded_doc, style)
-
-    def handle_pipeline_run_file(
-        self, file_path: FilePath, loaded_doc: Any, style: YAMLStyle
-    ) -> None:
-        yaml_paths = [
-            ["spec", "pipelineSpec", "tasks"],
-            ["spec", "pipelineSpec", "finally"],
-        ]
-        self._handle_paths(yaml_paths, file_path, loaded_doc, style)
-
-    def _handle_paths(
-        self, yaml_paths: List[List[str]], file_path: FilePath, loaded_doc: Any, style: YAMLStyle
-    ):
-        not_found_task = [False] * len(yaml_paths)
-
-        def get_path_doc(ypath):
-            """:raises KeyError: when path doesn't exist"""
-            tmp_doc = copy.copy(loaded_doc)
-            for p in ypath:
-                tmp_doc = tmp_doc[p]
-            return tmp_doc
-
-        for index, yaml_path in enumerate(yaml_paths):
-            # check if path exist
-            try:
-                tmp_doc = get_path_doc(yaml_path)
-            except KeyError:
-                not_found_task[index] = True
-                continue
-
-            try:
-                self._add_param(tmp_doc, yaml_path, file_path, style)
-            except TaskNotFoundError:
-                not_found_task[index] = True
-
-        if all(not_found_task):
-            logger.warning(
-                "task '%s' does not exist in '%s'",
-                self.task_name,
-                file_path,
-            )
-
-    def _add_param(
+    def _do_action(
         self, tasks: CommentedSeq, path_prefix: YAMLPath, pipeline_file: FilePath, style: YAMLStyle
     ) -> bool:
         """Private function that adds parameter into task if needed (or create the whole params
@@ -271,64 +287,17 @@ def action_add_param(args) -> None:
         op.handle(str(file_path))
 
 
-class ModTaskRemoveParamOperation(PipelineFileOperation):
+class ModTaskRemoveParamOperation(TaskBase):
     def __init__(
         self,
         task_name: str,
         param_name: str,
     ) -> None:
+        super().__init__(task_name)
         self.task_name = task_name
         self.param_name = param_name
 
-    def handle_pipeline_file(self, file_path: FilePath, loaded_doc: Any, style: YAMLStyle) -> None:
-        yaml_paths = [
-            ["spec", "tasks"],
-            ["spec", "finally"],
-        ]
-        self._handle_paths(yaml_paths, file_path, loaded_doc, style)
-
-    def handle_pipeline_run_file(
-        self, file_path: FilePath, loaded_doc: Any, style: YAMLStyle
-    ) -> None:
-        yaml_paths = [
-            ["spec", "pipelineSpec", "tasks"],
-            ["spec", "pipelineSpec", "finally"],
-        ]
-        self._handle_paths(yaml_paths, file_path, loaded_doc, style)
-
-    def _handle_paths(
-        self, yaml_paths: List[List[str]], file_path: FilePath, loaded_doc: Any, style: YAMLStyle
-    ):
-        not_found_task = [False] * len(yaml_paths)
-
-        def get_path_doc(ypath):
-            """:raises KeyError: when path doesn't exist"""
-            tmp_doc = copy.copy(loaded_doc)
-            for p in ypath:
-                tmp_doc = tmp_doc[p]
-            return tmp_doc
-
-        for index, yaml_path in enumerate(yaml_paths):
-            # check if path exist
-            try:
-                tmp_doc = get_path_doc(yaml_path)
-            except KeyError:
-                not_found_task[index] = True
-                continue
-
-            try:
-                self._remove_param(tmp_doc, yaml_path, file_path, style)
-            except TaskNotFoundError:
-                not_found_task[index] = True
-
-        if all(not_found_task):
-            logger.warning(
-                "task '%s' does not exist in '%s'",
-                self.task_name,
-                file_path,
-            )
-
-    def _remove_param(
+    def _do_action(
         self, tasks: CommentedSeq, path_prefix: YAMLPath, pipeline_file: FilePath, style: YAMLStyle
     ) -> bool:
         """Private function that removes parameter from task if needed

@@ -102,6 +102,71 @@ command usages:
 
 Get more information by `pmt add-task -h`
 
+### To modify Konflux pipelines with `modify`
+
+Sub-command `modify` provides rich options to modify existing pipeline/pipeline runs YAML files,
+mainly for automatic migrations.
+This command is designed to do as minimal as possible changes to the file,
+making the minimal git diff output, compared for example with `yq -i` command that may change
+the structure of the whole YAML file.
+
+pipeline-migration-tool (`pmt` command) is configured in Konflux Mintmaker to allow usage in migrations.
+
+* Example of adding new parameter:
+
+with yq (discouraged):
+
+```bash
+  yq -i "(.spec.tasks[] | select(.name == \"sast-coverity-check\")).params += \
+    [{\"name\": \"image-url\", \"value\": \"$image_url_value\"}]" "$pipeline_file"
+```
+
+the same with `pmt modify`:
+
+```bash
+  pmt modify -f "$pipeline_file" task sast-coverity-check add-param image-url "$image_url_value"
+```
+
+Get more information about supported resources by `pmt modify -h`, and supported commands
+for the given resource by `pmt modify RESOURCE -h` (for example `pmt modify task -h`).
+
+#### Known issues
+
+Subcommand `modify` has following known issues
+
+* Indentation of inline comment may not be preserved when value on the same line us updated
+Example when value change:
+
+```yaml
+key: value  # comment
+```
+
+```yaml
+key: replaced-value      # comment
+```
+
+* YAML Flow style has limited support, to ensure safe modification,
+ flow style will be regenerated to block style on affected keys.
+
+For example, adding item `{"item": "test"}` into flow style list:
+
+```yaml
+---
+start:
+  flow: [{item: one, ...}, {item: two, ...}]
+```
+
+will result into:
+
+```yaml
+---
+start:
+  flow:
+  - {item: one, ...}
+  - {item: two, ...}
+  - item: test
+```
+
 ## Run tests
 
 ```bash

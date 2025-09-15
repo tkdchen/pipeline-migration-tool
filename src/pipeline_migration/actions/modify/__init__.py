@@ -2,6 +2,7 @@ import argparse
 from typing import Final
 
 from pipeline_migration.actions.modify.task import register_cli as register_mod_task_cli
+from pipeline_migration.actions.modify.generic import register_cli as register_mod_generic_cli
 
 SUBCMD_DESCRIPTION: Final = """\
 Allows to modify existing resources in Konflux pipelines/pipeline runs.
@@ -32,3 +33,4 @@ def register_cli(subparser) -> None:
         title="subcommands to manage given resources", required=True
     )
     register_mod_task_cli(subparser_modify)
+    register_mod_generic_cli(subparser_modify)

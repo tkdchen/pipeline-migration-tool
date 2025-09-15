@@ -130,6 +130,37 @@ the same with `pmt modify`:
 Get more information about supported resources by `pmt modify -h`, and supported commands
 for the given resource by `pmt modify RESOURCE -h` (for example `pmt modify task -h`).
 
+#### Unsupported resource?
+
+When resource you need is not supported by `pmt modify` you can use `generic` subcommand
+which processes raw YAML text without semantic validation but tries to keep minimal changes
+done to the YAML file.
+
+It's not recommended to use this subcommand if specific resource subcommand exists.
+
+Sub-command `generic` supports following operations: `insert`, `replace`, and `remove`.
+
+Each operation requires a YAML path to the target item.
+Yaml path is sequence of indexes (compatible with `yq`'s `path` function):
+
+```yaml
+- spec
+- tasks
+- 5
+```
+
+Also singleline notation using YAML flow style can be used:`["spec", "tasks", 5]`.
+Item to be updated must be sequence or map type.
+
+Example using yq:
+```bash
+    pmt modify \\
+      -f .tekton/pr.yaml \\
+      generic remove \\
+      "$(yq '.spec.pipelineSpec.tasks[] | select(.name == "prefetch-dependencies") | \\
+         path' .tekton/pr.yaml)"
+```
+
 #### Known issues
 
 Subcommand `modify` has following known issues
@@ -184,7 +215,7 @@ This integration test sets up a testing environment, inside which tasks are buil
 
 Prerequisite:
 
-- A local clone of [konflux-ci/build-definitions](https://github.com/konflux-ci/build-definitions) 
+- A local clone of [konflux-ci/build-definitions](https://github.com/konflux-ci/build-definitions)
   and checkout to `main` branch.
 - Create public image repositories `task-clone` and `task-lint` under specified `QUAY_NAMESPACE`.
 - Log into Quay.io in order to make `tkn-bundle-push` work.

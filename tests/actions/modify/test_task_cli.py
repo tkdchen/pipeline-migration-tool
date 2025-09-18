@@ -433,6 +433,19 @@ class TestModifyTaskRemoveParam:
         pipeline_run_file = component_pipeline_dir.tekton_dir / "pipeline-run.yaml"
         verify_param_removed(pipeline_run_file, "deploy", "namespace")
 
+    def test_use_relative_tekton_dir(self, component_pipeline_dir, monkeypatch):
+        """Test using the default .tekton directory."""
+        # Change to the component directory
+        monkeypatch.chdir(str(component_pipeline_dir.base_path))
+
+        cmd = ["pmt", "modify", "task", "clone", "remove-param", "url"]
+
+        monkeypatch.setattr("sys.argv", cmd)
+        entry_point()
+
+        for yaml_file in component_pipeline_dir.tekton_dir.glob("*.yaml"):
+            verify_param_removed(yaml_file, "clone", "url")
+
     def test_remove_nonexistent_param(self, component_pipeline_dir, monkeypatch):
         """Test removing a parameter that doesn't exist (should do nothing)."""
         cmd = [

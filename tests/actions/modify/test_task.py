@@ -4,6 +4,8 @@ from textwrap import dedent
 from pipeline_migration.actions.modify.task import (
     ModTaskAddParamOperation,
     ModTaskRemoveParamOperation,
+    ModTaskMatrixAddParamOperation,
+    ModTaskMatrixRemoveParamOperation,
     TaskNotFoundError,
 )
 from pipeline_migration.utils import load_yaml, YAMLStyle
@@ -149,6 +151,149 @@ def pipeline_run_finally_yaml_file(create_yaml_file):
     return create_yaml_file(content)
 
 
+@pytest.fixture
+def pipeline_matrix_yaml_file(create_yaml_file):
+    """Create a temporary YAML file with a pipeline structure."""
+    content = dedent(
+        """\
+        apiVersion: tekton.dev/v1
+        kind: Pipeline
+        metadata:
+          name: test-pipeline
+        spec:
+          tasks:
+            - name: clone
+              taskRef:
+                name: git-clone
+              matrix:
+                params:
+                  - name: revision
+                    value:
+                    - "main"
+                    - "test"
+            - name: test-task
+              taskRef:
+                name: test-runner
+        """
+    )
+    return create_yaml_file(content)
+
+
+@pytest.fixture
+def pipeline_matrix_finally_yaml_file(create_yaml_file):
+    """Create a temporary YAML file with a pipeline structure."""
+    content = dedent(
+        """\
+        apiVersion: tekton.dev/v1
+        kind: Pipeline
+        metadata:
+          name: test-pipeline
+        spec:
+          finally:
+            - name: clone
+              taskRef:
+                name: git-clone
+              matrix:
+                params:
+                  - name: revision
+                    value:
+                    - "main"
+                    - "test"
+            - name: test-task
+              taskRef:
+                name: test-runner
+        """
+    )
+    return create_yaml_file(content)
+
+
+@pytest.fixture
+def pipeline_run_matrix_yaml_file(create_yaml_file):
+    """Create a temporary YAML file with a PipelineRun structure."""
+    content = dedent(
+        """\
+        apiVersion: tekton.dev/v1
+        kind: PipelineRun
+        metadata:
+          name: test-pipeline-run
+        spec:
+          pipelineSpec:
+            tasks:
+              - name: clone
+                taskRef:
+                  name: git-clone
+                matrix:
+                  params:
+                    - name: revision
+                      value:
+                      - "main"
+                      - "test"
+              - name: test-task
+                taskRef:
+                  name: test-runner
+        """
+    )
+    return create_yaml_file(content)
+
+
+@pytest.fixture
+def pipeline_run_matrix_include_only_yaml_file(create_yaml_file):
+    """Create a temporary YAML file with a PipelineRun structure."""
+    content = dedent(
+        """\
+        apiVersion: tekton.dev/v1
+        kind: PipelineRun
+        metadata:
+          name: test-pipeline-run
+        spec:
+          pipelineSpec:
+            tasks:
+              - name: clone
+                taskRef:
+                  name: git-clone
+                matrix:
+                  include:
+                    - name: test-one
+                      params:
+                      - name: url
+                        value: $(params.url)
+              - name: test-task
+                taskRef:
+                  name: test-runner
+        """
+    )
+    return create_yaml_file(content)
+
+
+@pytest.fixture
+def pipeline_run_matrix_finally_yaml_file(create_yaml_file):
+    """Create a temporary YAML file with a PipelineRun structure."""
+    content = dedent(
+        """\
+        apiVersion: tekton.dev/v1
+        kind: PipelineRun
+        metadata:
+          name: test-pipeline-run
+        spec:
+          pipelineSpec:
+            finally:
+              - name: clone
+                taskRef:
+                  name: git-clone
+                matrix:
+                  params:
+                    - name: revision
+                      value:
+                      - "main"
+                      - "test"
+              - name: test-task
+                taskRef:
+                  name: test-runner
+        """
+    )
+    return create_yaml_file(content)
+
+
 class TestModTaskAddParamOperation:
     """Test cases for ModTaskAddParamOperation class."""
 
@@ -169,7 +314,7 @@ class TestModTaskAddParamOperation:
         tasks = loaded_doc["spec"]["tasks"]
 
         # Execute operation
-        result = op._add_param(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
+        result = op._do_action(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
         assert result is True
 
         expected = dedent(
@@ -214,7 +359,7 @@ class TestModTaskAddParamOperation:
         tasks = loaded_doc["spec"]["tasks"]
 
         # Execute operation
-        result = op._add_param(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
+        result = op._do_action(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
         assert result is True
 
         expected = dedent(
@@ -260,7 +405,7 @@ class TestModTaskAddParamOperation:
         tasks = loaded_doc["spec"]["tasks"]
 
         # Execute operation
-        result = op._add_param(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
+        result = op._do_action(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
         assert result is True
 
         expected = dedent(
@@ -305,7 +450,7 @@ class TestModTaskAddParamOperation:
         tasks = loaded_doc["spec"]["tasks"]
 
         # Execute operation
-        result = op._add_param(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
+        result = op._do_action(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
         assert result is True
 
         expected = dedent(
@@ -350,7 +495,7 @@ class TestModTaskAddParamOperation:
         tasks = loaded_doc["spec"]["tasks"]
 
         # Execute operation
-        result = op._add_param(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
+        result = op._do_action(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
         assert result is False  # No change needed
 
         expected = dedent(
@@ -394,7 +539,7 @@ class TestModTaskAddParamOperation:
 
         # Execute operation
         with pytest.raises(TaskNotFoundError):
-            op._add_param(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
+            op._do_action(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
 
         expected = dedent(
             """\
@@ -615,7 +760,7 @@ class TestModTaskRemoveParamOperation:
         tasks = loaded_doc["spec"]["tasks"]
 
         # Execute operation
-        result = op._remove_param(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
+        result = op._do_action(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
         assert result is True
 
         expected = dedent(
@@ -656,7 +801,7 @@ class TestModTaskRemoveParamOperation:
         tasks = loaded_doc["spec"]["tasks"]
 
         # Execute operation
-        result = op._remove_param(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
+        result = op._do_action(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
         assert result is False
 
         expected = dedent(
@@ -699,7 +844,7 @@ class TestModTaskRemoveParamOperation:
         tasks = loaded_doc["spec"]["tasks"]
 
         # Execute operation
-        result = op._remove_param(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
+        result = op._do_action(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
         assert result is False
 
         expected = dedent(
@@ -743,7 +888,7 @@ class TestModTaskRemoveParamOperation:
 
         # Execute operation
         with pytest.raises(TaskNotFoundError):
-            op._remove_param(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
+            op._do_action(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
 
         expected = dedent(
             """\
@@ -930,6 +1075,751 @@ class TestModTaskRemoveParamOperation:
         assert read_file_content(pipeline_run_finally_yaml_file) == expected
 
 
+class TestModTaskMatrixAddParamOperation:
+    """Test cases for ModTaskAddParamOperation class."""
+
+    def test_initialization(self):
+        """Test operation initialization."""
+        op = ModTaskMatrixAddParamOperation("clone", "timeout", "30m")
+        assert op.task_name == "clone"
+        assert op.param_name == "timeout"
+        assert op.param_value == "30m"
+
+    def test_add_param_to_existing_params_list(self, pipeline_matrix_yaml_file):
+        """Test adding a parameter to a task that already has parameters."""
+        op = ModTaskMatrixAddParamOperation("clone", "timeout", "30m")
+
+        # Load initial data
+        loaded_doc = load_yaml(pipeline_matrix_yaml_file)
+        style = YAMLStyle.detect(pipeline_matrix_yaml_file)
+        tasks = loaded_doc["spec"]["tasks"]
+
+        # Execute operation
+        result = op._do_action(tasks, ["spec", "tasks"], pipeline_matrix_yaml_file, style)
+        assert result is True
+
+        expected = dedent(
+            """\
+            apiVersion: tekton.dev/v1
+            kind: Pipeline
+            metadata:
+              name: test-pipeline
+            spec:
+              tasks:
+                - name: clone
+                  taskRef:
+                    name: git-clone
+                  matrix:
+                    params:
+                      - name: revision
+                        value:
+                        - "main"
+                        - "test"
+                      - name: timeout
+                        value: 30m
+                - name: test-task
+                  taskRef:
+                    name: test-runner
+            """
+        )
+
+        assert read_file_content(pipeline_matrix_yaml_file) == expected
+
+    def test_add_param_to_task_without_params(self, pipeline_matrix_yaml_file):
+        """Test adding a parameter to a task that has no existing parameters."""
+        op = ModTaskMatrixAddParamOperation("test-task", "verbose", "true")
+
+        # Load initial data
+        loaded_doc = load_yaml(pipeline_matrix_yaml_file)
+        style = YAMLStyle.detect(pipeline_matrix_yaml_file)
+        tasks = loaded_doc["spec"]["tasks"]
+
+        # Execute operation
+        result = op._do_action(tasks, ["spec", "tasks"], pipeline_matrix_yaml_file, style)
+        assert result is True
+
+        expected = dedent(
+            """\
+            apiVersion: tekton.dev/v1
+            kind: Pipeline
+            metadata:
+              name: test-pipeline
+            spec:
+              tasks:
+                - name: clone
+                  taskRef:
+                    name: git-clone
+                  matrix:
+                    params:
+                      - name: revision
+                        value:
+                        - "main"
+                        - "test"
+                - name: test-task
+                  taskRef:
+                    name: test-runner
+                  matrix:
+                    params:
+                    - name: verbose
+                      value: 'true'
+            """
+        )
+
+        assert read_file_content(pipeline_matrix_yaml_file) == expected
+
+    def test_update_existing_param_value(self, pipeline_matrix_yaml_file):
+        """Test updating an existing parameter value."""
+        op = ModTaskMatrixAddParamOperation("clone", "revision", "test-scalar")
+
+        # Load initial data
+        loaded_doc = load_yaml(pipeline_matrix_yaml_file)
+        style = YAMLStyle.detect(pipeline_matrix_yaml_file)
+        tasks = loaded_doc["spec"]["tasks"]
+
+        # Execute operation
+        result = op._do_action(tasks, ["spec", "tasks"], pipeline_matrix_yaml_file, style)
+        assert result is True
+
+        expected = dedent(
+            """\
+            apiVersion: tekton.dev/v1
+            kind: Pipeline
+            metadata:
+              name: test-pipeline
+            spec:
+              tasks:
+                - name: clone
+                  taskRef:
+                    name: git-clone
+                  matrix:
+                    params:
+                      - name: revision
+                        value: test-scalar
+                - name: test-task
+                  taskRef:
+                    name: test-runner
+            """
+        )
+
+        assert read_file_content(pipeline_matrix_yaml_file) == expected
+
+    def test_update_existing_param_value_with_array(self, pipeline_matrix_yaml_file):
+        """Test updating an existing parameter value."""
+        op = ModTaskMatrixAddParamOperation("clone", "revision", ["test1", "test2"])
+
+        # Load initial data
+        loaded_doc = load_yaml(pipeline_matrix_yaml_file)
+        style = YAMLStyle.detect(pipeline_matrix_yaml_file)
+        tasks = loaded_doc["spec"]["tasks"]
+
+        # Execute operation
+        result = op._do_action(tasks, ["spec", "tasks"], pipeline_matrix_yaml_file, style)
+        assert result is True
+
+        expected = dedent(
+            """\
+            apiVersion: tekton.dev/v1
+            kind: Pipeline
+            metadata:
+              name: test-pipeline
+            spec:
+              tasks:
+                - name: clone
+                  taskRef:
+                    name: git-clone
+                  matrix:
+                    params:
+                      - name: revision
+                        value:
+                        - test1
+                        - test2
+                - name: test-task
+                  taskRef:
+                    name: test-runner
+            """
+        )
+
+        assert read_file_content(pipeline_matrix_yaml_file) == expected
+
+    def test_no_change_when_param_value_same(self, pipeline_matrix_yaml_file):
+        """Test that no change is made when parameter value is already the same."""
+        op = ModTaskMatrixAddParamOperation("clone", "revision", ["main", "test"])
+
+        # Load initial data
+        loaded_doc = load_yaml(pipeline_matrix_yaml_file)
+        style = YAMLStyle.detect(pipeline_matrix_yaml_file)
+        tasks = loaded_doc["spec"]["tasks"]
+
+        # Execute operation
+        result = op._do_action(tasks, ["spec", "tasks"], pipeline_matrix_yaml_file, style)
+        assert result is False  # No change needed
+
+        expected = dedent(
+            """\
+            apiVersion: tekton.dev/v1
+            kind: Pipeline
+            metadata:
+              name: test-pipeline
+            spec:
+              tasks:
+                - name: clone
+                  taskRef:
+                    name: git-clone
+                  matrix:
+                    params:
+                      - name: revision
+                        value:
+                        - "main"
+                        - "test"
+                - name: test-task
+                  taskRef:
+                    name: test-runner
+            """
+        )
+
+        assert read_file_content(pipeline_matrix_yaml_file) == expected
+
+    def test_task_not_found(self, pipeline_matrix_yaml_file):
+        """Test behavior when specified task doesn't exist."""
+        op = ModTaskMatrixAddParamOperation("nonexistent-task", "param", "value")
+
+        # Load initial data
+        loaded_doc = load_yaml(pipeline_matrix_yaml_file)
+        style = YAMLStyle.detect(pipeline_matrix_yaml_file)
+        tasks = loaded_doc["spec"]["tasks"]
+
+        # Execute operation
+        with pytest.raises(TaskNotFoundError):
+            op._do_action(tasks, ["spec", "tasks"], pipeline_matrix_yaml_file, style)
+
+        expected = dedent(
+            """\
+            apiVersion: tekton.dev/v1
+            kind: Pipeline
+            metadata:
+              name: test-pipeline
+            spec:
+              tasks:
+                - name: clone
+                  taskRef:
+                    name: git-clone
+                  matrix:
+                    params:
+                      - name: revision
+                        value:
+                        - "main"
+                        - "test"
+                - name: test-task
+                  taskRef:
+                    name: test-runner
+            """
+        )
+
+        assert read_file_content(pipeline_matrix_yaml_file) == expected
+
+    def test_handle_pipeline_file(self, pipeline_matrix_yaml_file):
+        """Test handle_pipeline_file method."""
+        op = ModTaskMatrixAddParamOperation("clone", "timeout", "30m")
+
+        loaded_doc = load_yaml(pipeline_matrix_yaml_file)
+        style = YAMLStyle.detect(pipeline_matrix_yaml_file)
+
+        # This should not raise an exception
+        op.handle_pipeline_file(pipeline_matrix_yaml_file, loaded_doc, style)
+
+        expected = dedent(
+            """\
+            apiVersion: tekton.dev/v1
+            kind: Pipeline
+            metadata:
+              name: test-pipeline
+            spec:
+              tasks:
+                - name: clone
+                  taskRef:
+                    name: git-clone
+                  matrix:
+                    params:
+                      - name: revision
+                        value:
+                        - "main"
+                        - "test"
+                      - name: timeout
+                        value: 30m
+                - name: test-task
+                  taskRef:
+                    name: test-runner
+            """
+        )
+
+        assert read_file_content(pipeline_matrix_yaml_file) == expected
+
+    def test_handle_pipeline_run_file(self, pipeline_run_matrix_yaml_file):
+        """Test handle_pipeline_run_file method."""
+        op = ModTaskMatrixAddParamOperation("clone", "timeout", "30m")
+
+        loaded_doc = load_yaml(pipeline_run_matrix_yaml_file)
+        style = YAMLStyle.detect(pipeline_run_matrix_yaml_file)
+
+        # This should not raise an exception
+        op.handle_pipeline_run_file(pipeline_run_matrix_yaml_file, loaded_doc, style)
+        expected = dedent(
+            """\
+            apiVersion: tekton.dev/v1
+            kind: PipelineRun
+            metadata:
+              name: test-pipeline-run
+            spec:
+              pipelineSpec:
+                tasks:
+                  - name: clone
+                    taskRef:
+                      name: git-clone
+                    matrix:
+                      params:
+                        - name: revision
+                          value:
+                          - "main"
+                          - "test"
+                        - name: timeout
+                          value: 30m
+                  - name: test-task
+                    taskRef:
+                      name: test-runner
+            """
+        )
+
+        assert read_file_content(pipeline_run_matrix_yaml_file) == expected
+
+    def test_handle_pipeline_file_finally(self, pipeline_matrix_finally_yaml_file):
+        """Test handle_pipeline_file method (with tasks in finally section)."""
+        op = ModTaskMatrixAddParamOperation("clone", "timeout", "30m")
+
+        loaded_doc = load_yaml(pipeline_matrix_finally_yaml_file)
+        style = YAMLStyle.detect(pipeline_matrix_finally_yaml_file)
+
+        # This should not raise an exception
+        op.handle_pipeline_file(pipeline_matrix_finally_yaml_file, loaded_doc, style)
+
+        expected = dedent(
+            """\
+        apiVersion: tekton.dev/v1
+        kind: Pipeline
+        metadata:
+          name: test-pipeline
+        spec:
+          finally:
+            - name: clone
+              taskRef:
+                name: git-clone
+              matrix:
+                params:
+                  - name: revision
+                    value:
+                    - "main"
+                    - "test"
+                  - name: timeout
+                    value: 30m
+            - name: test-task
+              taskRef:
+                name: test-runner
+            """
+        )
+
+        assert read_file_content(pipeline_matrix_finally_yaml_file) == expected
+
+    def test_handle_pipeline_run_file_finally(self, pipeline_run_matrix_finally_yaml_file):
+        """Test handle_pipeline_run_file method (with tasks in finally section)."""
+        op = ModTaskMatrixAddParamOperation("clone", "timeout", "30m")
+
+        loaded_doc = load_yaml(pipeline_run_matrix_finally_yaml_file)
+        style = YAMLStyle.detect(pipeline_run_matrix_finally_yaml_file)
+
+        # This should not raise an exception
+        op.handle_pipeline_run_file(pipeline_run_matrix_finally_yaml_file, loaded_doc, style)
+
+        expected = dedent(
+            """\
+            apiVersion: tekton.dev/v1
+            kind: PipelineRun
+            metadata:
+              name: test-pipeline-run
+            spec:
+              pipelineSpec:
+                finally:
+                  - name: clone
+                    taskRef:
+                      name: git-clone
+                    matrix:
+                      params:
+                        - name: revision
+                          value:
+                          - "main"
+                          - "test"
+                        - name: timeout
+                          value: 30m
+                  - name: test-task
+                    taskRef:
+                      name: test-runner
+            """
+        )
+
+        assert read_file_content(pipeline_run_matrix_finally_yaml_file) == expected
+
+    def test_handle_pipeline_run_file_matrix_include_only(
+        self, pipeline_run_matrix_include_only_yaml_file
+    ):
+        """Test when matrix has defined include attr."""
+        op = ModTaskMatrixAddParamOperation("clone", "timeout", "30m")
+
+        loaded_doc = load_yaml(pipeline_run_matrix_include_only_yaml_file)
+        style = YAMLStyle.detect(pipeline_run_matrix_include_only_yaml_file)
+
+        # This should not raise an exception
+        op.handle_pipeline_run_file(pipeline_run_matrix_include_only_yaml_file, loaded_doc, style)
+
+        expected = dedent(
+            """\
+        apiVersion: tekton.dev/v1
+        kind: PipelineRun
+        metadata:
+          name: test-pipeline-run
+        spec:
+          pipelineSpec:
+            tasks:
+              - name: clone
+                taskRef:
+                  name: git-clone
+                matrix:
+                  include:
+                    - name: test-one
+                      params:
+                      - name: url
+                        value: $(params.url)
+                  params:
+                  - name: timeout
+                    value: 30m
+              - name: test-task
+                taskRef:
+                  name: test-runner
+            """
+        )
+
+        assert read_file_content(pipeline_run_matrix_include_only_yaml_file) == expected
+
+
+class TestModTaskMatrixRemoveParamOperation:
+    """Test cases for ModTaskRemoveParamOperation class."""
+
+    def test_initialization(self):
+        """Test operation initialization."""
+        op = ModTaskMatrixRemoveParamOperation("clone", "timeout")
+        assert op.task_name == "clone"
+        assert op.param_name == "timeout"
+
+    def test_remove_existing_param(self, pipeline_matrix_yaml_file):
+        """Test removing an existing parameter."""
+        op = ModTaskMatrixRemoveParamOperation("clone", "revision")
+
+        # Load initial data
+        loaded_doc = load_yaml(pipeline_matrix_yaml_file)
+        style = YAMLStyle.detect(pipeline_matrix_yaml_file)
+        tasks = loaded_doc["spec"]["tasks"]
+
+        # Execute operation
+        result = op._do_action(tasks, ["spec", "tasks"], pipeline_matrix_yaml_file, style)
+        assert result is True
+
+        expected = dedent(
+            """\
+            apiVersion: tekton.dev/v1
+            kind: Pipeline
+            metadata:
+              name: test-pipeline
+            spec:
+              tasks:
+                - name: clone
+                  taskRef:
+                    name: git-clone
+                - name: test-task
+                  taskRef:
+                    name: test-runner
+            """
+        )
+
+        assert read_file_content(pipeline_matrix_yaml_file) == expected
+
+    def test_remove_param_from_task_without_params(self, pipeline_matrix_yaml_file):
+        """Test removing a parameter from a task that has no parameters."""
+        op = ModTaskMatrixRemoveParamOperation("test-task", "nonexistent")
+
+        # Load initial data
+        loaded_doc = load_yaml(pipeline_matrix_yaml_file)
+        style = YAMLStyle.detect(pipeline_matrix_yaml_file)
+        tasks = loaded_doc["spec"]["tasks"]
+
+        # Execute operation
+        result = op._do_action(tasks, ["spec", "tasks"], pipeline_matrix_yaml_file, style)
+        assert result is False
+
+        expected = dedent(
+            """\
+            apiVersion: tekton.dev/v1
+            kind: Pipeline
+            metadata:
+              name: test-pipeline
+            spec:
+              tasks:
+                - name: clone
+                  taskRef:
+                    name: git-clone
+                  matrix:
+                    params:
+                      - name: revision
+                        value:
+                        - "main"
+                        - "test"
+                - name: test-task
+                  taskRef:
+                    name: test-runner
+            """
+        )
+
+        assert read_file_content(pipeline_matrix_yaml_file) == expected
+
+    def test_remove_nonexistent_param(self, pipeline_matrix_yaml_file):
+        """Test removing a parameter that doesn't exist."""
+        op = ModTaskMatrixRemoveParamOperation("clone", "nonexistent-param")
+
+        # Load initial data
+        loaded_doc = load_yaml(pipeline_matrix_yaml_file)
+        style = YAMLStyle.detect(pipeline_matrix_yaml_file)
+        tasks = loaded_doc["spec"]["tasks"]
+
+        # Execute operation
+        result = op._do_action(tasks, ["spec", "tasks"], pipeline_matrix_yaml_file, style)
+        assert result is False
+
+        expected = dedent(
+            """\
+            apiVersion: tekton.dev/v1
+            kind: Pipeline
+            metadata:
+              name: test-pipeline
+            spec:
+              tasks:
+                - name: clone
+                  taskRef:
+                    name: git-clone
+                  matrix:
+                    params:
+                      - name: revision
+                        value:
+                        - "main"
+                        - "test"
+                - name: test-task
+                  taskRef:
+                    name: test-runner
+            """
+        )
+
+        assert read_file_content(pipeline_matrix_yaml_file) == expected
+
+    def test_task_not_found(self, pipeline_matrix_yaml_file):
+        """Test behavior when specified task doesn't exist."""
+        op = ModTaskMatrixRemoveParamOperation("nonexistent-task", "param")
+
+        # Load initial data
+        loaded_doc = load_yaml(pipeline_matrix_yaml_file)
+        style = YAMLStyle.detect(pipeline_matrix_yaml_file)
+        tasks = loaded_doc["spec"]["tasks"]
+
+        # Execute operation
+        with pytest.raises(TaskNotFoundError):
+            op._do_action(tasks, ["spec", "tasks"], pipeline_matrix_yaml_file, style)
+
+        expected = dedent(
+            """\
+            apiVersion: tekton.dev/v1
+            kind: Pipeline
+            metadata:
+              name: test-pipeline
+            spec:
+              tasks:
+                - name: clone
+                  taskRef:
+                    name: git-clone
+                  matrix:
+                    params:
+                      - name: revision
+                        value:
+                        - "main"
+                        - "test"
+                - name: test-task
+                  taskRef:
+                    name: test-runner
+            """
+        )
+
+        assert read_file_content(pipeline_matrix_yaml_file) == expected
+
+    def test_handle_pipeline_file(self, pipeline_matrix_yaml_file):
+        """Test handle_pipeline_file method."""
+        op = ModTaskMatrixRemoveParamOperation("clone", "revision")
+
+        loaded_doc = load_yaml(pipeline_matrix_yaml_file)
+        style = YAMLStyle.detect(pipeline_matrix_yaml_file)
+
+        # This should not raise an exception
+        op.handle_pipeline_file(pipeline_matrix_yaml_file, loaded_doc, style)
+
+        expected = dedent(
+            """\
+            apiVersion: tekton.dev/v1
+            kind: Pipeline
+            metadata:
+              name: test-pipeline
+            spec:
+              tasks:
+                - name: clone
+                  taskRef:
+                    name: git-clone
+                - name: test-task
+                  taskRef:
+                    name: test-runner
+            """
+        )
+
+        assert read_file_content(pipeline_matrix_yaml_file) == expected
+
+    def test_handle_pipeline_run_file(self, pipeline_run_matrix_yaml_file):
+        """Test handle_pipeline_run_file method."""
+        op = ModTaskMatrixRemoveParamOperation("clone", "revision")
+
+        loaded_doc = load_yaml(pipeline_run_matrix_yaml_file)
+        style = YAMLStyle.detect(pipeline_run_matrix_yaml_file)
+
+        # This should not raise an exception
+        op.handle_pipeline_run_file(pipeline_run_matrix_yaml_file, loaded_doc, style)
+
+        expected = dedent(
+            """\
+            apiVersion: tekton.dev/v1
+            kind: PipelineRun
+            metadata:
+              name: test-pipeline-run
+            spec:
+              pipelineSpec:
+                tasks:
+                  - name: clone
+                    taskRef:
+                      name: git-clone
+                  - name: test-task
+                    taskRef:
+                      name: test-runner
+            """
+        )
+
+        assert read_file_content(pipeline_run_matrix_yaml_file) == expected
+
+    def test_handle_pipeline_file_finally(self, pipeline_matrix_finally_yaml_file):
+        """Test handle_pipeline_file method (with tasks in finally section).."""
+        op = ModTaskMatrixRemoveParamOperation("clone", "revision")
+
+        loaded_doc = load_yaml(pipeline_matrix_finally_yaml_file)
+        style = YAMLStyle.detect(pipeline_matrix_finally_yaml_file)
+
+        # This should not raise an exception
+        op.handle_pipeline_file(pipeline_matrix_finally_yaml_file, loaded_doc, style)
+
+        expected = dedent(
+            """\
+            apiVersion: tekton.dev/v1
+            kind: Pipeline
+            metadata:
+              name: test-pipeline
+            spec:
+              finally:
+                - name: clone
+                  taskRef:
+                    name: git-clone
+                - name: test-task
+                  taskRef:
+                    name: test-runner
+            """
+        )
+
+        assert read_file_content(pipeline_matrix_finally_yaml_file) == expected
+
+    def test_handle_pipeline_run_file_finally(self, pipeline_run_matrix_finally_yaml_file):
+        """Test handle_pipeline_run_file method (with tasks in finally section).."""
+        op = ModTaskMatrixRemoveParamOperation("clone", "revision")
+
+        loaded_doc = load_yaml(pipeline_run_matrix_finally_yaml_file)
+        style = YAMLStyle.detect(pipeline_run_matrix_finally_yaml_file)
+
+        # This should not raise an exception
+        op.handle_pipeline_run_file(pipeline_run_matrix_finally_yaml_file, loaded_doc, style)
+
+        expected = dedent(
+            """\
+            apiVersion: tekton.dev/v1
+            kind: PipelineRun
+            metadata:
+              name: test-pipeline-run
+            spec:
+              pipelineSpec:
+                finally:
+                  - name: clone
+                    taskRef:
+                      name: git-clone
+                  - name: test-task
+                    taskRef:
+                      name: test-runner
+            """
+        )
+
+        assert read_file_content(pipeline_run_matrix_finally_yaml_file) == expected
+
+    def test_handle_pipeline_run_file_matrix_include_only(
+        self, pipeline_run_matrix_include_only_yaml_file
+    ):
+        """Test removal of nonexistent params entry, but with defined matrix"""
+        op = ModTaskMatrixRemoveParamOperation("clone", "revision")
+
+        loaded_doc = load_yaml(pipeline_run_matrix_include_only_yaml_file)
+        style = YAMLStyle.detect(pipeline_run_matrix_include_only_yaml_file)
+
+        # This should not raise an exception
+        op.handle_pipeline_run_file(pipeline_run_matrix_include_only_yaml_file, loaded_doc, style)
+
+        expected = dedent(
+            """\
+            apiVersion: tekton.dev/v1
+            kind: PipelineRun
+            metadata:
+              name: test-pipeline-run
+            spec:
+              pipelineSpec:
+                tasks:
+                  - name: clone
+                    taskRef:
+                      name: git-clone
+                    matrix:
+                      include:
+                        - name: test-one
+                          params:
+                          - name: url
+                            value: $(params.url)
+                  - name: test-task
+                    taskRef:
+                      name: test-runner
+            """
+        )
+
+        assert read_file_content(pipeline_run_matrix_include_only_yaml_file) == expected
+
+
 class TestComplexScenarios:
     """Test complex scenarios involving multiple operations."""
 
@@ -940,14 +1830,14 @@ class TestComplexScenarios:
         loaded_doc = load_yaml(pipeline_yaml_file)
         style = YAMLStyle.detect(pipeline_yaml_file)
         tasks = loaded_doc["spec"]["tasks"]
-        result1 = op1._add_param(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
+        result1 = op1._do_action(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
         assert result1 is True
 
         # Add second parameter
         op2 = ModTaskAddParamOperation("clone", "depth", "1")
         loaded_doc = load_yaml(pipeline_yaml_file)
         tasks = loaded_doc["spec"]["tasks"]
-        result2 = op2._add_param(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
+        result2 = op2._do_action(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
         assert result2 is True
 
         expected = dedent(
@@ -991,14 +1881,14 @@ class TestComplexScenarios:
         loaded_doc = load_yaml(pipeline_yaml_file)
         style = YAMLStyle.detect(pipeline_yaml_file)
         tasks = loaded_doc["spec"]["tasks"]
-        result_add = op_add._add_param(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
+        result_add = op_add._do_action(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
         assert result_add is True
 
         # Remove parameter
         op_remove = ModTaskRemoveParamOperation("clone", "timeout")
         loaded_doc = load_yaml(pipeline_yaml_file)
         tasks = loaded_doc["spec"]["tasks"]
-        result_remove = op_remove._remove_param(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
+        result_remove = op_remove._do_action(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
         assert result_remove is True
 
         expected = dedent(
@@ -1038,21 +1928,21 @@ class TestComplexScenarios:
         loaded_doc = load_yaml(pipeline_yaml_file)
         style = YAMLStyle.detect(pipeline_yaml_file)
         tasks = loaded_doc["spec"]["tasks"]
-        result1 = op1._add_param(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
+        result1 = op1._do_action(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
         assert result1 is True
 
         # Add param to build task
         op2 = ModTaskAddParamOperation("build", "CONTEXT", "./")
         loaded_doc = load_yaml(pipeline_yaml_file)
         tasks = loaded_doc["spec"]["tasks"]
-        result2 = op2._add_param(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
+        result2 = op2._do_action(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
         assert result2 is True
 
         # Remove param from build task
         op3 = ModTaskRemoveParamOperation("build", "IMAGE")
         loaded_doc = load_yaml(pipeline_yaml_file)
         tasks = loaded_doc["spec"]["tasks"]
-        result3 = op3._remove_param(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
+        result3 = op3._do_action(tasks, ["spec", "tasks"], pipeline_yaml_file, style)
         assert result3 is True
 
         expected = dedent(

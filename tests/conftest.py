@@ -9,8 +9,10 @@ import responses
 
 from pipeline_migration.types import DescriptorT, ManifestT
 from pipeline_migration.registry import (
+    MEDIA_TYPE_OCI_EMTPY_V1,
     Container,
     MEDIA_TYPE_OCI_IMAGE_CONFIG_V1,
+    MEDIA_TYPE_OCI_IMAGE_LAYER_V1_TAR,
     MEDIA_TYPE_OCI_IMAGE_LAYER_V1_TAR_GZ,
     MEDIA_TYPE_OCI_IMAGE_MANIFEST_V1,
 )
@@ -42,6 +44,30 @@ def image_manifest() -> ManifestT:
             },
         ],
         "annotations": {},
+    }
+
+
+@pytest.fixture
+def migration_image_manifest() -> ManifestT:
+    return {
+        "schemaVersion": 2,
+        "mediaType": MEDIA_TYPE_OCI_IMAGE_MANIFEST_V1,
+        "config": {
+            "mediaType": MEDIA_TYPE_OCI_EMTPY_V1,
+            "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8b",
+            "size": 2,
+            "data": "e30=",
+        },
+        "layers": [
+            {
+                "mediaType": MEDIA_TYPE_OCI_IMAGE_LAYER_V1_TAR,
+                "digest": "sha256:498ce84ac04c70f2bce9630eec216a33f8ab0f345702a830826548f773e351ec",
+                "size": 113,
+            },
+        ],
+        "annotations": {
+            "dev.konflux-ci.task.is-migration": "true",
+        },
     }
 
 
@@ -108,6 +134,30 @@ def mock_get_manifest(image_manifest):
         if previous_migration_bundle is not None:
             annotations[ANNOTATION_PREVIOUS_MIGRATION_BUNDLE] = previous_migration_bundle
         responses.add(responses.GET, f"https://{c.manifest_url()}", json=manifest_json)
+
+    return _mock
+
+
+@pytest.fixture
+def mock_get_manifest_for_migration(migration_image_manifest):
+
+    def _mock(c: Container, filename: str, add_additional_layer=False):
+        assert "/" not in filename, "File name should not include path components"
+        manifest_json = deepcopy(migration_image_manifest)
+        layers = manifest_json["layers"]
+        annotations = layers[0].setdefault("annotations", {})
+        annotations["org.opencontainers.image.title"] = filename
+        layers[0]["digest"] = generate_digest()
+        if add_additional_layer:
+            layers.append(
+                {
+                    "mediaType": MEDIA_TYPE_OCI_IMAGE_LAYER_V1_TAR,
+                    "digest": generate_digest(),
+                    "size": 404,
+                },
+            )
+        responses.add(responses.GET, f"https://{c.manifest_url()}", json=manifest_json)
+        return manifest_json
 
     return _mock
 

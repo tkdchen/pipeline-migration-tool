@@ -839,7 +839,6 @@ class MigrationImagesResolver(Resolver):
 
     def _resolve_task(self, bundle_upgrade: TaskBundleUpgrade) -> None:
         for tb_migration in self._resolve_migrations(bundle_upgrade, []):
-            print("-->", tb_migration)
             bundle_upgrade.migrations.append(tb_migration)
 
 

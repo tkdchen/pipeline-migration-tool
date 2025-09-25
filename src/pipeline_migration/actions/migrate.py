@@ -567,7 +567,7 @@ class Resolver(ABC):
     def _resolve_migrations(
         self, bundle_upgrade: TaskBundleUpgrade, upgrades_range: list[QuayTagInfo]
     ) -> Generator[TaskBundleMigration, Any, None]:
-        """Resolve migraitons for a bundle upgrade
+        """Resolve migrations for a bundle upgrade
 
         :param bundle_upgrade: instance of TaskBundleUpgrade.
         :param upgrades_range: a list of Quay tag mappings from which to discover migrations.

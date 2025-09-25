@@ -1183,14 +1183,14 @@ class TestMigrationImagesResolver:
         api_url = f"https://quay.io/api/v1/repository/{c.api_prefix}/tag/"
         tags = [
             # This should be excluded.
-            {"name": f"migration-0.1-{generate_sha256sum()}-{next_ts()}"},
-            {"name": f"migration-0.3-{generate_sha256sum()}-{next_ts()}"},
+            {"name": f"migration-0.3.2-{generate_sha256sum()}-{next_ts()}"},
+            {"name": f"migration-0.2.1-{sha256sum_0_2_1_sh}-{next_ts()}"},
+            {"name": f"migration-0.2.1-{sha256sum_0_2_1_sh}-{next_ts()}"},
             # This should be excluded.
             {"name": f"migration-0.3-{generate_sha256sum()}-{next_ts()}-test"},
-            {"name": f"migration-0.2.1-{sha256sum_0_2_1_sh}-{next_ts()}"},
-            {"name": f"migration-0.2.1-{sha256sum_0_2_1_sh}-{next_ts()}"},
+            {"name": f"migration-0.3-{generate_sha256sum()}-{next_ts()}"},
             # This should be excluded.
-            {"name": f"migration-0.3.2-{generate_sha256sum()}-{next_ts()}"},
+            {"name": f"migration-0.1-{generate_sha256sum()}-{next_ts()}"},
         ]
         responses.get(
             api_url,

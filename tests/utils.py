@@ -33,6 +33,6 @@ def generate_timestamp():
     counter = count()
 
     def _inner() -> int:
-        return int(time.time()) + next(counter)
+        return int(time.time()) - next(counter)
 
     return _inner

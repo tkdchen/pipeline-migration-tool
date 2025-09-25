@@ -467,8 +467,8 @@ class TestModTaskAddParamOperation:
                   params:
                     - name: url
                       value:
-                      - https://github.com/new/repo
-                      - another_url
+                        - https://github.com/new/repo
+                        - another_url
                     - name: revision
                       value: "main"
                 - name: build

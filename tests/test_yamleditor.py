@@ -10,6 +10,7 @@ from pipeline_migration.yamleditor import (
 )
 from pipeline_migration.utils import (
     load_yaml,
+    YAMLStyle,
 )
 
 
@@ -390,12 +391,32 @@ class TestEditYAMLEntry:
             name: test-pipeline
             spec:
               tasks:
+              - name: task1
+                taskRef:
+                  name: clone
+                params:
+                - name: repo-url
+                  value: "https://example.com/example/repo"
+            """
+        )
+
+        return create_yaml_file(content)
+
+    @pytest.fixture
+    def simple_yaml_file_style2(self, create_yaml_file):
+        """Create a temporary YAML file with simple structure.
+        Extra indentation of the list entries."""
+        content = dedent(
+            """\
+            name: test-pipeline
+            spec:
+              tasks:
                 - name: task1
                   taskRef:
                     name: clone
                   params:
-                  - name: repo-url
-                    value: "https://example.com/example/repo"
+                    - name: repo-url
+                      value: "https://example.com/example/repo"
             """
         )
 
@@ -515,7 +536,34 @@ class TestEditYAMLEntry:
 
     def test_insert_into_dict(self, simple_yaml_file):
         """Test inserting new key-value pair into a dictionary."""
-        editor = EditYAMLEntry(simple_yaml_file)
+        style = YAMLStyle.detect(simple_yaml_file)
+        editor = EditYAMLEntry(simple_yaml_file, style)
+
+        new_data = {"runAfter": ["another-task"]}
+        editor.insert(["spec", "tasks", 0], new_data)
+
+        expected = dedent(
+            """\
+            name: test-pipeline
+            spec:
+              tasks:
+              - name: task1
+                taskRef:
+                  name: clone
+                params:
+                - name: repo-url
+                  value: "https://example.com/example/repo"
+                runAfter:
+                - another-task
+            """
+        )
+
+        assert read_file_content(simple_yaml_file) == expected
+
+    def test_insert_into_dict_style2(self, simple_yaml_file_style2):
+        """Test inserting new key-value pair into a dictionary with style2 defined."""
+        style = YAMLStyle.detect(simple_yaml_file_style2)
+        editor = EditYAMLEntry(simple_yaml_file_style2, style)
 
         new_data = {"runAfter": ["another-task"]}
         editor.insert(["spec", "tasks", 0], new_data)
@@ -529,18 +577,19 @@ class TestEditYAMLEntry:
                   taskRef:
                     name: clone
                   params:
-                  - name: repo-url
-                    value: "https://example.com/example/repo"
+                    - name: repo-url
+                      value: "https://example.com/example/repo"
                   runAfter:
-                  - another-task
+                    - another-task
             """
         )
 
-        assert read_file_content(simple_yaml_file) == expected
+        assert read_file_content(simple_yaml_file_style2) == expected
 
     def test_insert_into_dict_nested_structure(self, simple_yaml_file):
         """Test inserting new nested structure pair into a dictionary."""
-        editor = EditYAMLEntry(simple_yaml_file)
+        style = YAMLStyle.detect(simple_yaml_file)
+        editor = EditYAMLEntry(simple_yaml_file, style)
 
         new_data = {"matrix": {"params": [{"name": "platform", "value": ["linux", "mac"]}]}}
         editor.insert(["spec", "tasks", 0], new_data)
@@ -550,18 +599,18 @@ class TestEditYAMLEntry:
             name: test-pipeline
             spec:
               tasks:
-                - name: task1
-                  taskRef:
-                    name: clone
+              - name: task1
+                taskRef:
+                  name: clone
+                params:
+                - name: repo-url
+                  value: "https://example.com/example/repo"
+                matrix:
                   params:
-                  - name: repo-url
-                    value: "https://example.com/example/repo"
-                  matrix:
-                    params:
-                    - name: platform
-                      value:
-                      - linux
-                      - mac
+                  - name: platform
+                    value:
+                    - linux
+                    - mac
             """
         )
 
@@ -569,7 +618,34 @@ class TestEditYAMLEntry:
 
     def test_insert_into_list(self, simple_yaml_file):
         """Test inserting new item into a list."""
-        editor = EditYAMLEntry(simple_yaml_file)
+        style = YAMLStyle.detect(simple_yaml_file)
+        editor = EditYAMLEntry(simple_yaml_file, style)
+
+        new_data = {"name": "new-param", "value": "new-value"}
+        editor.insert(["spec", "tasks", 0, "params"], new_data)
+
+        expected = dedent(
+            """\
+            name: test-pipeline
+            spec:
+              tasks:
+              - name: task1
+                taskRef:
+                  name: clone
+                params:
+                - name: repo-url
+                  value: "https://example.com/example/repo"
+                - name: new-param
+                  value: new-value
+            """
+        )
+
+        assert read_file_content(simple_yaml_file) == expected
+
+    def test_insert_into_list_style2(self, simple_yaml_file_style2):
+        """Test inserting new item into a list with style2 defined."""
+        style = YAMLStyle.detect(simple_yaml_file_style2)
+        editor = EditYAMLEntry(simple_yaml_file_style2, style)
 
         new_data = {"name": "new-param", "value": "new-value"}
         editor.insert(["spec", "tasks", 0, "params"], new_data)
@@ -583,18 +659,43 @@ class TestEditYAMLEntry:
                   taskRef:
                     name: clone
                   params:
-                  - name: repo-url
-                    value: "https://example.com/example/repo"
-                  - name: new-param
-                    value: new-value
+                    - name: repo-url
+                      value: "https://example.com/example/repo"
+                    - name: new-param
+                      value: new-value
+            """
+        )
+
+        assert read_file_content(simple_yaml_file_style2) == expected
+
+    def test_replace_dict_value(self, simple_yaml_file):
+        """Test replacing a value in a dictionary."""
+        style = YAMLStyle.detect(simple_yaml_file)
+        editor = EditYAMLEntry(simple_yaml_file, style)
+
+        new_data = {"name": "test"}
+        editor.replace(["spec", "tasks", 0, "taskRef"], new_data)
+
+        expected = dedent(
+            """\
+            name: test-pipeline
+            spec:
+              tasks:
+              - name: task1
+                taskRef:
+                  name: test
+                params:
+                - name: repo-url
+                  value: "https://example.com/example/repo"
             """
         )
 
         assert read_file_content(simple_yaml_file) == expected
 
-    def test_replace_dict_value(self, simple_yaml_file):
-        """Test replacing a value in a dictionary."""
-        editor = EditYAMLEntry(simple_yaml_file)
+    def test_replace_dict_value_style2(self, simple_yaml_file_style2):
+        """Test replacing a value in a dictionary with style2 defined."""
+        style = YAMLStyle.detect(simple_yaml_file_style2)
+        editor = EditYAMLEntry(simple_yaml_file_style2, style)
 
         new_data = {"name": "test"}
         editor.replace(["spec", "tasks", 0, "taskRef"], new_data)
@@ -608,16 +709,41 @@ class TestEditYAMLEntry:
                   taskRef:
                     name: test
                   params:
-                  - name: repo-url
-                    value: "https://example.com/example/repo"
+                    - name: repo-url
+                      value: "https://example.com/example/repo"
+            """
+        )
+
+        assert read_file_content(simple_yaml_file_style2) == expected
+
+    def test_replace_list_item(self, simple_yaml_file):
+        """Test replacing an item in a list."""
+        style = YAMLStyle.detect(simple_yaml_file)
+        editor = EditYAMLEntry(simple_yaml_file, style)
+
+        new_item = {"name": "replaced-item", "value": 999}
+        editor.replace(["spec", "tasks", 0, "params", 0], new_item)
+
+        expected = dedent(
+            """\
+            name: test-pipeline
+            spec:
+              tasks:
+              - name: task1
+                taskRef:
+                  name: clone
+                params:
+                - name: replaced-item
+                  value: 999
             """
         )
 
         assert read_file_content(simple_yaml_file) == expected
 
-    def test_replace_list_item(self, simple_yaml_file):
-        """Test replacing an item in a list."""
-        editor = EditYAMLEntry(simple_yaml_file)
+    def test_replace_list_item_style2(self, simple_yaml_file_style2):
+        """Test replacing an item in a list with style2 defined."""
+        style = YAMLStyle.detect(simple_yaml_file_style2)
+        editor = EditYAMLEntry(simple_yaml_file_style2, style)
 
         new_item = {"name": "replaced-item", "value": 999}
         editor.replace(["spec", "tasks", 0, "params", 0], new_item)
@@ -631,16 +757,17 @@ class TestEditYAMLEntry:
                   taskRef:
                     name: clone
                   params:
-                  - name: replaced-item
-                    value: 999
+                    - name: replaced-item
+                      value: 999
             """
         )
 
-        assert read_file_content(simple_yaml_file) == expected
+        assert read_file_content(simple_yaml_file_style2) == expected
 
     def test_delete_from_dict(self, simple_yaml_file):
         """Test deleting a key from a dictionary."""
-        editor = EditYAMLEntry(simple_yaml_file)
+        style = YAMLStyle.detect(simple_yaml_file)
+        editor = EditYAMLEntry(simple_yaml_file, style)
 
         editor.delete(["spec", "tasks", 0, "taskRef"])
 
@@ -649,10 +776,10 @@ class TestEditYAMLEntry:
             name: test-pipeline
             spec:
               tasks:
-                - name: task1
-                  params:
-                  - name: repo-url
-                    value: "https://example.com/example/repo"
+              - name: task1
+                params:
+                - name: repo-url
+                  value: "https://example.com/example/repo"
             """
         )
 
@@ -660,7 +787,8 @@ class TestEditYAMLEntry:
 
     def test_delete_from_list(self, simple_yaml_file):
         """Test deleting an item from a list."""
-        editor = EditYAMLEntry(simple_yaml_file)
+        style = YAMLStyle.detect(simple_yaml_file)
+        editor = EditYAMLEntry(simple_yaml_file, style)
 
         editor.delete(["spec", "tasks", 0, "params", 0])
 
@@ -669,9 +797,9 @@ class TestEditYAMLEntry:
             name: test-pipeline
             spec:
               tasks:
-                - name: task1
-                  taskRef:
-                    name: clone
+              - name: task1
+                taskRef:
+                  name: clone
             """
         )
 
@@ -679,7 +807,8 @@ class TestEditYAMLEntry:
 
     def test_delete_empty_parents(self, simple_yaml_file):
         """Test deleting empty parents recursivelly"""
-        editor = EditYAMLEntry(simple_yaml_file)
+        style = YAMLStyle.detect(simple_yaml_file)
+        editor = EditYAMLEntry(simple_yaml_file, style)
 
         editor.delete(["spec", "tasks", 0])
 
@@ -752,7 +881,8 @@ class TestEditYAMLEntry:
 
     def test_multiple_operations_sequence(self, simple_yaml_file):
         """Test performing multiple operations in sequence."""
-        editor = EditYAMLEntry(simple_yaml_file)
+        style = YAMLStyle.detect(simple_yaml_file)
+        editor = EditYAMLEntry(simple_yaml_file, style)
 
         # Insert new task
         new_task = {"name": "task2", "taskRef": {"name": "deploy"}}
@@ -766,12 +896,12 @@ class TestEditYAMLEntry:
             name: test-pipeline
             spec:
               tasks:
-                - name: task1
-                  taskRef:
-                    name: clone
-                - name: task2
-                  taskRef:
-                    name: deploy
+              - name: task1
+                taskRef:
+                  name: clone
+              - name: task2
+                taskRef:
+                  name: deploy
             """
         )
 

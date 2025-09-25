@@ -271,7 +271,7 @@ class ModTaskAddParamOperation(TaskBase):
                             pipeline_file,
                             self.param_name,
                         )
-                        yamledit = EditYAMLEntry(pipeline_file)
+                        yamledit = EditYAMLEntry(pipeline_file, style=style)
                         yamledit.replace(path, param)
                         return True
 
@@ -291,7 +291,7 @@ class ModTaskAddParamOperation(TaskBase):
                 pipeline_file,
                 self.param_name,
             )
-            yamledit = EditYAMLEntry(pipeline_file)
+            yamledit = EditYAMLEntry(pipeline_file, style=style)
             yamledit.insert(path, new_data)
             return True
 

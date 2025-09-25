@@ -306,8 +306,15 @@ class EditYAMLEntry:
         )
         yaml_output = stream.getvalue()
 
+        # with different yaml styles depending on exact yaml doc, ruamel.yaml may generate various
+        # indentation; we need to normalize it by dedent so col num can be used to do exact
+        # indentation as we need
+        # Note: we want to generate as close as possible to original doc style, so we cannot use
+        # our own style
+        dedented_yaml_output = textwrap.dedent(yaml_output)
+
         # Indent each line of the YAML output by the column position
-        indented = textwrap.indent(yaml_output, " " * col)
+        indented = textwrap.indent(dedented_yaml_output, " " * col)
         return indented
 
     def _pre_process_flow_style_replace(

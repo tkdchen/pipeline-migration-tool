@@ -779,7 +779,7 @@ class MigrationImagesResolver(Resolver):
             # So, in this in-version bundle update, there is no new migration to apply.
             return
         image_repo = bundle_upgrade.dep_name
-        migrations: list[tuple[str, TaskBundleMigration]] = []
+        migrations: list[tuple[Version, TaskBundleMigration]] = []
         c = Container(image_repo)
         tags = list_active_repo_tags(c, tag_name_pattern=MIGRATION_IMAGE_TAG_LIKE_PATTERN)
         version_checksum_pairs: dict[str, str] = {}
@@ -810,7 +810,7 @@ class MigrationImagesResolver(Resolver):
                 migration_script = self._fetch_migration_script(f"{image_repo}:{tag_name}")
                 migrations.append(
                     (
-                        actual_task_version,
+                        parse_version(actual_task_version),
                         TaskBundleMigration(
                             task_bundle=f"{image_repo}:{actual_task_version}",
                             migration_script=migration_script,

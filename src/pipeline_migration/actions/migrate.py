@@ -862,12 +862,12 @@ def has_migration_image(image_repo: str) -> bool:
         is returned.
     """
     c = Container(image_repo)
-    limit = 10
+    tags_count = 10
     tags_iter = list_active_repo_tags(
-        c, tag_name_pattern=MIGRATION_IMAGE_TAG_LIKE_PATTERN, limit=limit
+        c, tag_name_pattern=MIGRATION_IMAGE_TAG_LIKE_PATTERN, per_page=tags_count
     )
     results: list[bool] = []
-    for i in range(limit):
+    for i in range(tags_count):
         try:
             tag_name = next(tags_iter)["name"]
             results.append(MigrationImageTag.parse(tag_name) is not None)

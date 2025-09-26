@@ -23,7 +23,7 @@ class QuayTagInfo:
 
 
 def list_active_repo_tags(
-    c: Container, tag_name: str = "", tag_name_pattern: str = "", limit: int = 0
+    c: Container, tag_name: str = "", tag_name_pattern: str = "", per_page: int = 0
 ) -> Generator[dict, Any, None]:
     """List repository tags
 
@@ -39,8 +39,8 @@ def list_active_repo_tags(
             params["specificTag"] = tag_name
         if tag_name_pattern:
             params["filter_tag_name"] = f"like:{tag_name_pattern}"
-        if limit > 0:
-            params["limit"] = str(limit)
+        if per_page > 0:
+            params["limit"] = str(per_page)
         api_url = f"https://{c.registry}/api/v1/repository/{c.namespace}/{c.repository}/tag/"
         resp = requests.get(api_url, params=params)
         resp.raise_for_status()

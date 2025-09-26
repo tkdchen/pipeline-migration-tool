@@ -12,13 +12,17 @@ from unittest.mock import patch
 from pipeline_migration.utils import YAMLStyle, dump_yaml, load_yaml
 import responses
 import pytest
+from responses import matchers
 
 from pipeline_migration.actions import migrate
 from pipeline_migration.actions.migrate import (
     ANNOTATION_HAS_MIGRATION,
     ANNOTATION_IS_MIGRATION,
     ANNOTATION_TRUTH_VALUE,
+    MIGRATION_IMAGE_TAG_LIKE_PATTERN,
     MigrationApplyError,
+    MigrationImageTag,
+    MigrationImagesResolver,
     determine_task_bundle_upgrades_range,
     fetch_migration_file,
     IncorrectMigrationAttachment,
@@ -28,11 +32,12 @@ from pipeline_migration.actions.migrate import (
     TaskBundleUpgrade,
     TaskBundleUpgradesManager,
     MigrationFileOperation,
+    MigrationResolveError,
     PackageFile,
 )
 from pipeline_migration.quay import QuayTagInfo
 from pipeline_migration.registry import Container
-from tests.utils import generate_digest
+from tests.utils import generate_digest, generate_sha256sum, generate_timestamp
 
 
 # Tags are listed from the latest to the oldest one.
@@ -1067,3 +1072,226 @@ def test_drop_out_of_order_versions(tags_info, bundle_upgrade, expected):
     tags = migrate.list_bundle_tags(bundle_upgrade)
     result = migrate.drop_out_of_order_versions(tags, bundle_upgrade)
     assert result == tuple(expected)
+
+
+next_ts = generate_timestamp()
+
+
+class TestMigrationImagesResolver:
+
+    @responses.activate
+    @pytest.mark.parametrize(
+        "tags",
+        [
+            pytest.param(
+                [{"name": f"migration-0.3-{generate_sha256sum()}-{next_ts()}-test"}],
+                id="no-expected-migration-tag-is-retrieved-from-registry",
+            ),
+            pytest.param([], id="migration-tag-is-not-present-in-registry"),
+        ],
+    )
+    def test_bundle_upgrade_does_not_have_migrations(self, tags):
+        c = Container(TASK_BUNDLE_CLONE)
+        api_url = f"https://quay.io/api/v1/repository/{c.api_prefix}/tag/"
+        tags = [
+            {"name": f"migration-0.3-{generate_sha256sum()}-{next_ts()}-test"},
+        ]
+        responses.get(
+            api_url,
+            json={"tags": tags, "page": 1, "has_additional": False},
+            match=[
+                matchers.query_param_matcher(
+                    {
+                        "page": "1",
+                        "onlyActiveTags": "true",
+                        "filter_tag_name": "like:" + MIGRATION_IMAGE_TAG_LIKE_PATTERN,
+                    },
+                )
+            ],
+        )
+
+        tb_upgrade = TaskBundleUpgrade(
+            dep_name=TASK_BUNDLE_CLONE,
+            current_value="0.1",
+            current_digest=generate_digest(),
+            new_value="0.3",
+            new_digest=generate_digest(),
+        )
+        resolver = MigrationImagesResolver()
+        resolver.resolve([tb_upgrade])
+
+        migration_scripts = [m.migration_script for m in tb_upgrade.migrations]
+        assert migration_scripts == []
+
+    @responses.activate
+    def test_fail_if_migration_is_modified(self):
+        c = Container(TASK_BUNDLE_CLONE)
+        api_url = f"https://quay.io/api/v1/repository/{c.api_prefix}/tag/"
+        responses.get(
+            api_url,
+            json={
+                "tags": [
+                    {"name": f"migration-0.2.1-{generate_sha256sum()}-{next_ts()}"},
+                    {"name": f"migration-0.2.1-{generate_sha256sum()}-{next_ts()}"},
+                ],
+                "page": 1,
+                "has_additional": False,
+            },
+            match=[
+                matchers.query_param_matcher(
+                    {
+                        "page": "1",
+                        "onlyActiveTags": "true",
+                        "filter_tag_name": "like:" + MIGRATION_IMAGE_TAG_LIKE_PATTERN,
+                    },
+                )
+            ],
+        )
+
+        tb_upgrade = TaskBundleUpgrade(
+            dep_name=TASK_BUNDLE_CLONE,
+            current_value="0.1",
+            current_digest=generate_digest(),
+            new_value="0.2",
+            new_digest=generate_digest(),
+        )
+        resolver = MigrationImagesResolver()
+        with pytest.raises(ExceptionGroup) as exc_info:
+            resolver.resolve([tb_upgrade])
+
+        assert exc_info.group_contains(
+            MigrationResolveError, match=r"Migration of task version 0.2.1 is modified."
+        )
+
+    @responses.activate
+    def test_migrations_are_resolved(self, mock_get_manifest_for_migration):
+        """Test resolver fetches expected migrations
+
+        Quay API listRepoTags is mocked with a set of migration image tags, which cover several
+        test cases:
+
+        * Out-of-order tags to ensure the migrations are stored internally in correct order sorted
+          by actual task version.
+        * Migrations are out of upgrade range, like migration-0.1 and migration-0.3.2.
+        * Tags are skipped due to the Unexpected tag form
+        * Repeatedly pushed migrations. Pick one from them .
+        """
+
+        sha256sum_0_2_1_sh = generate_sha256sum()
+
+        c = Container(TASK_BUNDLE_CLONE)
+        api_url = f"https://quay.io/api/v1/repository/{c.api_prefix}/tag/"
+        tags = [
+            # This should be excluded.
+            {"name": f"migration-0.3.2-{generate_sha256sum()}-{next_ts()}"},
+            {"name": f"migration-0.2.1-{sha256sum_0_2_1_sh}-{next_ts()}"},
+            {"name": f"migration-0.2.1-{sha256sum_0_2_1_sh}-{next_ts()}"},
+            # This should be excluded.
+            {"name": f"migration-0.3-{generate_sha256sum()}-{next_ts()}-test"},
+            {"name": f"migration-0.3-{generate_sha256sum()}-{next_ts()}"},
+            # This should be excluded.
+            {"name": f"migration-0.1-{generate_sha256sum()}-{next_ts()}"},
+        ]
+        responses.get(
+            api_url,
+            json={"tags": tags, "page": 1, "has_additional": False},
+            match=[
+                matchers.query_param_matcher(
+                    {
+                        "page": "1",
+                        "onlyActiveTags": "true",
+                        "filter_tag_name": "like:" + MIGRATION_IMAGE_TAG_LIKE_PATTERN,
+                    },
+                )
+            ],
+        )
+
+        # Mock for Registry.pull()
+        for tag in tags:
+            tag_name = tag["name"]
+            c = Container(f"{TASK_BUNDLE_CLONE}:{tag_name}")
+            migration_image_tag = MigrationImageTag.parse(tag_name)
+            if migration_image_tag is not None:
+                version = migration_image_tag.version
+                manifest_json = mock_get_manifest_for_migration(c, f"{version}.sh")
+                # Mock get_blob
+                blob_digest = manifest_json["layers"][0]["digest"]
+                responses.get(f"https://{c.get_blob_url(blob_digest)}", body=f"echo {version}")
+
+        tb_upgrade = TaskBundleUpgrade(
+            dep_name=TASK_BUNDLE_CLONE,
+            current_value="0.1",
+            current_digest=generate_digest(),
+            new_value="0.3",
+            new_digest=generate_digest(),
+        )
+        resolver = MigrationImagesResolver()
+        resolver.resolve([tb_upgrade])
+
+        migration_scripts = [m.migration_script for m in tb_upgrade.migrations]
+        expected = ["echo 0.2.1", "echo 0.3"]
+        assert migration_scripts == expected
+
+    def test_no_migration_for_in_version_upgrade(self):
+        tb_upgrade = TaskBundleUpgrade(
+            dep_name=TASK_BUNDLE_CLONE,
+            current_value="0.3.2",
+            current_digest=generate_digest(),
+            new_value="0.3.2",
+            new_digest=generate_digest(),
+        )
+        resolver = MigrationImagesResolver()
+        resolver.resolve([tb_upgrade])
+
+        assert tb_upgrade.migrations == []
+
+    @responses.activate
+    def test_fail_if_migration_image_has_multiple_layers(self, mock_get_manifest_for_migration):
+        c = Container(TASK_BUNDLE_CLONE)
+        api_url = f"https://quay.io/api/v1/repository/{c.api_prefix}/tag/"
+        tags = [
+            {"name": f"migration-0.3-{generate_sha256sum()}-{next_ts()}"},
+        ]
+        responses.get(
+            api_url,
+            json={"tags": tags, "page": 1, "has_additional": False},
+            match=[
+                matchers.query_param_matcher(
+                    {
+                        "page": "1",
+                        "onlyActiveTags": "true",
+                        "filter_tag_name": "like:" + MIGRATION_IMAGE_TAG_LIKE_PATTERN,
+                    },
+                )
+            ],
+        )
+
+        # Mock for Registry.pull()
+        for tag in tags:
+            tag_name = tag["name"]
+            c = Container(f"{TASK_BUNDLE_CLONE}:{tag_name}")
+            migration_image_tag = MigrationImageTag.parse(tag_name)
+            if migration_image_tag is not None:
+                version = migration_image_tag.version
+                # make it fail
+                manifest_json = mock_get_manifest_for_migration(c, f"{version}.sh", True)
+                # Mock get_blob
+                blob_digest = manifest_json["layers"][0]["digest"]
+                responses.get(f"https://{c.get_blob_url(blob_digest)}", body=f"echo {version}")
+                blob_digest = manifest_json["layers"][1]["digest"]
+                responses.get(f"https://{c.get_blob_url(blob_digest)}", body="additional file")
+
+        tb_upgrade = TaskBundleUpgrade(
+            dep_name=TASK_BUNDLE_CLONE,
+            current_value="0.2.6",
+            current_digest=generate_digest(),
+            new_value="0.3",
+            new_digest=generate_digest(),
+        )
+        resolver = MigrationImagesResolver()
+        with pytest.raises(ExceptionGroup) as exc_info:
+            resolver.resolve([tb_upgrade])
+
+        assert exc_info.group_contains(
+            MigrationResolveError, match=r"Migration image [^ ]+ has multiple files:"
+        )

@@ -12,6 +12,7 @@ class DescriptorT(TypedDict):
     size: int
     annotations: NotRequired[AnnotationsT]
     artifactType: NotRequired[str]
+    data: NotRequired[str]
 
 
 class ImageIndexT(TypedDict):

@@ -17,6 +17,7 @@ MEDIA_TYPE_OCI_EMTPY_V1: Final = "application/vnd.oci.empty.v1+json"
 MEDIA_TYPE_OCI_IMAGE_CONFIG_V1: Final = "application/vnd.oci.image.config.v1+json"
 MEDIA_TYPE_OCI_IMAGE_INDEX_V1: Final = "application/vnd.oci.image.index.v1+json"
 MEDIA_TYPE_OCI_IMAGE_MANIFEST_V1: Final = "application/vnd.oci.image.manifest.v1+json"
+MEDIA_TYPE_OCI_IMAGE_LAYER_V1_TAR: Final = "application/vnd.oci.image.layer.v1.tar"
 MEDIA_TYPE_OCI_IMAGE_LAYER_V1_TAR_GZ: Final = "application/vnd.oci.image.layer.v1.tar+gzip"
 
 

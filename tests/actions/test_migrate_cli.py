@@ -11,12 +11,14 @@ from typing import Final
 import responses
 import pytest
 from oras.types import container_type
+from responses import matchers
 
 from pipeline_migration.cli import entry_point
 from pipeline_migration.actions.migrate import (
     ANNOTATION_HAS_MIGRATION,
     ANNOTATION_IS_MIGRATION,
     ANNOTATION_PREVIOUS_MIGRATION_BUNDLE,
+    MIGRATION_IMAGE_TAG_LIKE_PATTERN,
     clean_upgrades,
     InvalidRenovateUpgradesData,
 )
@@ -38,8 +40,7 @@ from tests.actions.test_migrate import (
     TASK_BUNDLE_SIGNATURE_SCAN,
     mock_list_repo_tags_with_filter_tag_name,
 )
-from tests.utils import generate_digest, generate_git_sha
-
+from tests.utils import generate_digest, generate_git_sha, generate_timestamp, generate_sha256sum
 
 UPGRADES: Final = [
     {
@@ -357,6 +358,38 @@ class MockRegistry(Registry):
         raise ValueError("No test data.")
 
 
+def mock_has_migration_images(image_repo: str, has: bool):
+    """Help resolver proxy to switch resolvers
+
+    Tags used in this mock does not affect other tests. They only help has_migration_images method
+    to make decision.
+    """
+    c = Container(image_repo)
+    api_url = f"https://quay.io/api/v1/repository/{c.api_prefix}/tag/"
+    next_ts = generate_timestamp()
+    if has:
+        tags = [
+            {"name": f"migration-0.3-{generate_sha256sum()}-{next_ts()}"},
+            {"name": f"migration-0.2.1-{generate_sha256sum()}-{next_ts()}-test"},
+        ]
+    else:
+        tags = [{"name": "0.1"}, {"name": f"0.1-{generate_git_sha()}"}]
+    responses.get(
+        api_url,
+        json={"tags": tags, "page": 1, "has_additional": False},
+        match=[
+            matchers.query_param_matcher(
+                {
+                    "page": "1",
+                    "onlyActiveTags": "true",
+                    "filter_tag_name": "like:" + MIGRATION_IMAGE_TAG_LIKE_PATTERN,
+                    "limit": "10",
+                },
+            )
+        ],
+    )
+
+
 class TestMigrateTaskBundleUpgrade:
 
     def _mock_quay_list_tags(self, bad_gateway_for: list[str] | None = None):
@@ -389,6 +422,7 @@ class TestMigrateTaskBundleUpgrade:
         use_linked_migrations,
         use_upgrades_file,
         pipeline_yaml_with_various_indent_styles,
+        mock_migration_images,
         monkeypatch,
         tmp_path,
         caplog,
@@ -448,6 +482,34 @@ class TestMigrateTaskBundleUpgrade:
             },
         ]
 
+        if use_linked_migrations:
+            mock_has_migration_images(TASK_BUNDLE_CLONE, False)
+            mock_has_migration_images(TASK_BUNDLE_SIGNATURE_SCAN, False)
+
+            # Add an upgrade to test the resolver proxy switches to MigrationImagesResolver to
+            # fetch migrations.
+            tb_upgrades.append(
+                {
+                    "depName": TASK_BUNDLE_LINT,
+                    "currentValue": "0.2",
+                    "currentDigest": generate_digest(),
+                    "newValue": "0.3",
+                    "newDigest": generate_digest(),
+                    "depTypes": ["tekton-bundle"],
+                    "packageFile": str(pipeline_file.relative_to(tmp_path)),
+                    "parentDir": pipeline_file.parent.name,
+                },
+            )
+            mock_has_migration_images(TASK_BUNDLE_LINT, True)
+            mock_migration_images(
+                TASK_BUNDLE_LINT,
+                [
+                    {"name": f"migration-0.3.1-{generate_sha256sum()}-{generate_timestamp()}"},
+                    {"name": f"migration-0.3-{generate_sha256sum()}-{generate_timestamp()}"},
+                    {"name": f"migration-0.2-{generate_sha256sum()}-{generate_timestamp()}"},
+                ],
+            )
+
         # Renovate runs migration tool from the root of the git repository.
         # This change simulates that behavior.
         monkeypatch.chdir(tmp_path)
@@ -471,6 +533,9 @@ class TestMigrateTaskBundleUpgrade:
             for image_data in MockRegistry.test_data
             for _, content in image_data.blobs.items()
         ]
+
+        if not use_linked_migrations:
+            migration_steps.append(b"echo 0.3.sh")
 
         def _subprocess_run(cmd, *args, **kwargs):
             pipeline_file = cmd[-1]
@@ -582,6 +647,10 @@ class TestMigrateTaskBundleUpgrade:
                 "parentDir": package_file.parent.name,
             },
         ]
+
+        mock_has_migration_images(TASK_BUNDLE_CLONE, False)
+        mock_has_migration_images(TASK_BUNDLE_LINT, False)
+        mock_has_migration_images(TASK_BUNDLE_SIGNATURE_SCAN, False)
 
         # make failure for lint
         self._mock_quay_list_tags(bad_gateway_for=[TASK_BUNDLE_LINT])

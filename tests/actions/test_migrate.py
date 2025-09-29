@@ -1164,7 +1164,7 @@ class TestMigrationImagesResolver:
         )
 
     @responses.activate
-    def test_migrations_are_resolved(self, mock_get_manifest_for_migration):
+    def test_migrations_are_resolved(self, mock_migration_images):
         """Test resolver fetches expected migrations
 
         Quay API listRepoTags is mocked with a set of migration image tags, which cover several
@@ -1178,45 +1178,20 @@ class TestMigrationImagesResolver:
         """
 
         sha256sum_0_2_1_sh = generate_sha256sum()
-
-        c = Container(TASK_BUNDLE_CLONE)
-        api_url = f"https://quay.io/api/v1/repository/{c.api_prefix}/tag/"
-        tags = [
-            # This should be excluded.
-            {"name": f"migration-0.3.2-{generate_sha256sum()}-{next_ts()}"},
-            {"name": f"migration-0.2.1-{sha256sum_0_2_1_sh}-{next_ts()}"},
-            {"name": f"migration-0.2.1-{sha256sum_0_2_1_sh}-{next_ts()}"},
-            # This should be excluded.
-            {"name": f"migration-0.3-{generate_sha256sum()}-{next_ts()}-test"},
-            {"name": f"migration-0.3-{generate_sha256sum()}-{next_ts()}"},
-            # This should be excluded.
-            {"name": f"migration-0.1-{generate_sha256sum()}-{next_ts()}"},
-        ]
-        responses.get(
-            api_url,
-            json={"tags": tags, "page": 1, "has_additional": False},
-            match=[
-                matchers.query_param_matcher(
-                    {
-                        "page": "1",
-                        "onlyActiveTags": "true",
-                        "filter_tag_name": "like:" + MIGRATION_IMAGE_TAG_LIKE_PATTERN,
-                    },
-                )
+        mock_migration_images(
+            TASK_BUNDLE_CLONE,
+            [
+                # This should be excluded.
+                {"name": f"migration-0.3.2-{generate_sha256sum()}-{next_ts()}"},
+                {"name": f"migration-0.2.1-{sha256sum_0_2_1_sh}-{next_ts()}"},
+                {"name": f"migration-0.2.1-{sha256sum_0_2_1_sh}-{next_ts()}"},
+                # This should be excluded.
+                {"name": f"migration-0.3-{generate_sha256sum()}-{next_ts()}-test"},
+                {"name": f"migration-0.3-{generate_sha256sum()}-{next_ts()}"},
+                # This should be excluded.
+                {"name": f"migration-0.1-{generate_sha256sum()}-{next_ts()}"},
             ],
         )
-
-        # Mock for Registry.pull()
-        for tag in tags:
-            tag_name = tag["name"]
-            c = Container(f"{TASK_BUNDLE_CLONE}:{tag_name}")
-            migration_image_tag = MigrationImageTag.parse(tag_name)
-            if migration_image_tag is not None:
-                version = migration_image_tag.version
-                manifest_json = mock_get_manifest_for_migration(c, f"{version}.sh")
-                # Mock get_blob
-                blob_digest = manifest_json["layers"][0]["digest"]
-                responses.get(f"https://{c.get_blob_url(blob_digest)}", body=f"echo {version}")
 
         tb_upgrade = TaskBundleUpgrade(
             dep_name=TASK_BUNDLE_CLONE,

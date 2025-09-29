@@ -589,6 +589,10 @@ class Resolver(ABC):
         # Migrations must be applied in the reverse order.
         bundle_upgrade.migrations.reverse()
 
+    def resolve_single_upgrade(self, bundle_upgrade: TaskBundleUpgrade) -> None:
+        """This is used by resolver proxy"""
+        return self._resolve_task(bundle_upgrade)
+
     def resolve(self, tb_upgrades: list[TaskBundleUpgrade]) -> None:
         """Resolve migrations for given task bundles upgrades
 
@@ -842,6 +846,62 @@ class MigrationImagesResolver(Resolver):
             bundle_upgrade.migrations.append(tb_migration)
 
 
+def has_migration_image(image_repo: str) -> bool:
+    """Guess if an image repository has migration images
+
+    During the transition to decentralized task repositories, not all tasks are built by the tekton
+    bundle builder pipeline and released via release pipeline. This method guesses whether a
+    repository has at least one migration image tag.
+
+    Tags are queried by a pattern that has fixed prefix ``migration-``. Although Quay does SQL LIKE
+    to match tag names, it should be good enough to get existing migration image tags if there is.
+
+    :param image_repo: bundle repository.
+    :type image_repo: str
+    :return: True if migration image tags are retrieved from the given repository. Otherwise, False
+        is returned.
+    """
+    c = Container(image_repo)
+    tags_count = 10
+    tags_iter = list_active_repo_tags(
+        c, tag_name_pattern=MIGRATION_IMAGE_TAG_LIKE_PATTERN, per_page=tags_count
+    )
+    results: list[bool] = []
+    for i in range(tags_count):
+        try:
+            tag_name = next(tags_iter)["name"]
+            results.append(MigrationImageTag.parse(tag_name) is not None)
+        except StopIteration:
+            break
+    return any(results)
+
+
+class DecentralizationTransitionResolverProxy(Resolver):
+
+    def __init__(self):
+        self.logger = logging.getLogger("migrate.resolver-proxy")
+        self._lmr = LinkedMigrationsResolver()
+        self._mir = MigrationImagesResolver()
+
+    def _resolve_migrations(
+        self, bundle_upgrade: TaskBundleUpgrade, upgrades_range: list[QuayTagInfo]
+    ) -> Generator[TaskBundleMigration, Any, None]:
+        """This method is useless for proxy"""
+        yield TaskBundleMigration("", "")  # yield empty instance to fulfill linters
+
+    def _resolve_task(self, bundle_upgrade: TaskBundleUpgrade) -> None:
+        if has_migration_image(bundle_upgrade.dep_name):
+            resolve_method = self._mir.resolve_single_upgrade
+        else:
+            resolve_method = self._lmr.resolve_single_upgrade
+        self.logger.debug(
+            "Migration image is found from repository %s, then use %s to resolve migrations.",
+            bundle_upgrade.dep_name,
+            resolve_method.__self__.__class__.__name__,
+        )
+        resolve_method(bundle_upgrade)
+
+
 def comes_from_konflux(image_repo: str) -> bool:
     if os.environ.get("PMT_LOCAL_TEST"):
         logger.warning(
@@ -965,7 +1025,7 @@ def action(args) -> None:
     if args.use_legacy_resolver:
         resolver_class = SimpleIterationResolver
     else:
-        resolver_class = LinkedMigrationsResolver
+        resolver_class = DecentralizationTransitionResolverProxy
 
     if args.upgrades_file:
         upgrades_data = args.upgrades_file.read_text().strip()

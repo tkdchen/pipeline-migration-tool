@@ -6,6 +6,7 @@ from pathlib import Path
 import tempfile
 
 import responses
+from responses import matchers
 
 from pipeline_migration.types import DescriptorT, ManifestT
 from pipeline_migration.registry import (
@@ -21,6 +22,8 @@ from pipeline_migration.actions.migrate import (
     ANNOTATION_IS_MIGRATION,
     ANNOTATION_PREVIOUS_MIGRATION_BUNDLE,
     ANNOTATION_TRUTH_VALUE,
+    MIGRATION_IMAGE_TAG_LIKE_PATTERN,
+    MigrationImageTag,
 )
 from tests.utils import generate_digest, RepoPath
 
@@ -310,3 +313,39 @@ def create_yaml_file(tmp_path):
         return tmp_file
 
     return _create
+
+
+@pytest.fixture
+def mock_migration_images(mock_get_manifest_for_migration):
+    """Mock for MigrationImagesResolver to discover and fetch migration images"""
+
+    def _mock(image_repo: str, tags: list[dict]):
+        c = Container(image_repo)
+        api_url = f"https://quay.io/api/v1/repository/{c.api_prefix}/tag/"
+        responses.get(
+            api_url,
+            json={"tags": tags, "page": 1, "has_additional": False},
+            match=[
+                matchers.query_param_matcher(
+                    {
+                        "page": "1",
+                        "onlyActiveTags": "true",
+                        "filter_tag_name": "like:" + MIGRATION_IMAGE_TAG_LIKE_PATTERN,
+                    },
+                )
+            ],
+        )
+
+        # Mock for Registry.pull()
+        for tag in tags:
+            tag_name = tag["name"]
+            c = Container(f"{image_repo}:{tag_name}")
+            migration_image_tag = MigrationImageTag.parse(tag_name)
+            if migration_image_tag is not None:
+                version = migration_image_tag.version
+                manifest_json = mock_get_manifest_for_migration(c, f"{version}.sh")
+                # Mock get_blob
+                blob_digest = manifest_json["layers"][0]["digest"]
+                responses.get(f"https://{c.get_blob_url(blob_digest)}", body=f"echo {version}")
+
+    return _mock

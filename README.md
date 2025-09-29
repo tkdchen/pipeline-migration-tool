@@ -167,12 +167,33 @@ start:
   - item: test
 ```
 
+## Development environment management
+
+* Create a virtual environment: `make venv/create`
+* Re-create the virtual environment: `make venv/recreate`
+* Update requirements after adding dependencies:
+  ```bash
+  source .venv/bin/activate
+  make deps/compile
+  ```
+* Upgrade dependencies:
+  ```bash
+  source .venv/bin/activate
+  make deps/upgrade
+  ```
+
+> [!NOTE]
+> If you create a virtual environment by yourself, please ensure create it with
+> python3.12 explicitly: `python3.12 -m venv .venv`
+>
+> When contributing dependency changes, open pull requests for adding and
+> upgrading dependencies separately.
+
 ## Run tests
 
 ```bash
-python3 -m venv venv
-source ./venv/bin/activate
-python3 -m pip install -r requirements-test.txt
+make venv/create
+source .venv/bin/activate
 tox
 ```
 

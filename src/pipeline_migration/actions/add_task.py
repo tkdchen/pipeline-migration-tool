@@ -14,8 +14,9 @@ from ruamel.yaml.scalarstring import DoubleQuotedScalarString
 from pipeline_migration.quay import get_active_tag
 from pipeline_migration.registry import REGISTRY, Container
 from pipeline_migration.types import FilePath
-from pipeline_migration.utils import dump_yaml, YAMLStyle, git_add
 from pipeline_migration.pipeline import PipelineFileOperation, iterate_files_or_dirs
+from pipeline_migration.yamleditor import EditYAMLEntry
+from pipeline_migration.utils import YAMLStyle, git_add
 
 logger = logging.getLogger("add_task")
 
@@ -172,24 +173,35 @@ class AddTaskOperation(PipelineFileOperation):
         self.git_add = git_add
 
     def handle_pipeline_file(self, file_path: FilePath, loaded_doc: Any, style: YAMLStyle) -> None:
+        yaml_path = ["spec", "tasks"]
         tasks = loaded_doc["spec"]["tasks"]
-        if self._add(tasks, str(file_path)):
-            dump_yaml(file_path, loaded_doc, style)
-            if self.git_add:
-                git_add(file_path)
-                logger.info("%s is added to git index.", file_path)
+        self._handle_pipeline_files(yaml_path, tasks, file_path, style)
 
     def handle_pipeline_run_file(
         self, file_path: FilePath, loaded_doc: Any, style: YAMLStyle
     ) -> None:
+        yaml_path = ["spec", "pipelineSpec", "tasks"]
         tasks = loaded_doc["spec"]["pipelineSpec"]["tasks"]
-        if self._add(tasks, str(file_path)):
-            dump_yaml(file_path, loaded_doc, style)
-            if self.git_add:
-                git_add(file_path)
-                logger.info("%s is added to git index.", file_path)
+        self._handle_pipeline_files(yaml_path, tasks, file_path, style)
 
-    def _add(self, tasks: CommentedSeq, pipeline_file: str) -> bool:
+    def _handle_pipeline_files(
+        self, yaml_path: list[str], tasks: Any, file_path: FilePath, style: YAMLStyle
+    ) -> None:
+        if not self._should_add_task(tasks, str(file_path)):
+            return None
+
+        yamledit = EditYAMLEntry(file_path, style=style)
+        yamledit.insert(yaml_path, self.task_config)
+
+        if self.git_add:
+            git_add(file_path)
+            logger.info("%s is added to git index.", file_path)
+
+    def _should_add_task(self, tasks: CommentedSeq, pipeline_file: str) -> bool:
+        """Check if task should be added and log appropriate messages.
+
+        Returns True if task should be added, False otherwise.
+        """
         existing_pipeline_task_names = set([])
         existing_actual_task_names = set([])
 
@@ -229,8 +241,7 @@ class AddTaskOperation(PipelineFileOperation):
             )
             return False
 
-        tasks.append(self.task_config)
-        logger.info("Task %s is added to pipeline %s", self.actual_task_name, pipeline_file)
+        logger.info("Task %s will be added to pipeline %s", self.actual_task_name, pipeline_file)
         return True
 
 

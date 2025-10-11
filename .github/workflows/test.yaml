@@ -12,7 +12,8 @@ jobs:
         with:
           python-version: '3.14'
       - run: |
-          python3 -m pip install -r requirements-test.txt
+          make venv/create
+          source .venv/bin/activate
           tox
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v5

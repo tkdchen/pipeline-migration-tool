@@ -4,6 +4,20 @@
     "config:recommended"
   ],
   "dependencyDashboard": false,
+
+  "pip_requirements": {
+    "enabled": false
+  },
+  "pip_setup": {
+    "enabled": false
+  },
+  "pip-compile": {
+    "managerFilePatterns": [
+      "requirements.txt",
+      "requirement-tests.txt"
+    ]
+  },
+
   "packageRules": [
     {
       "matchDatasources": ["pypi"],

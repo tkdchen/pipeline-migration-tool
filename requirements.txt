@@ -112,9 +112,9 @@ idna==3.10 \
     --hash=sha256:12f65c9b470abda6dc35cf8e63cc574b1c52b11df2c86030af0ac09b01b13ea9 \
     --hash=sha256:946d195a0d259cbba61165e88e65941f16e9b36ea6ddb97f00452bae8b1287d3
     # via requests
-jsonschema==4.23.0 \
-    --hash=sha256:d71497fef26351a33265337fa77ffeb82423f3ea21283cd9467bb03999266bc4 \
-    --hash=sha256:fbadb6f8b144a8f8cf9f0b89ba94501d143e50411a1278633f56a7acf7fd5566
+jsonschema==4.25.1 \
+    --hash=sha256:3fba0169e345c7175110351d456342c364814cfcf3b964ba4587f22915230a63 \
+    --hash=sha256:e4a9655ce0da0c0b67a085847e00a3a51449e1157f4f75e9fb5aa545e122eb85
     # via
     #   oras
     #   pipeline-migration-tool (pyproject.toml)
@@ -122,9 +122,9 @@ jsonschema-specifications==2025.4.1 \
     --hash=sha256:4653bffbd6584f7de83a67e0d620ef16900b390ddc7939d56684d6c81e33f1af \
     --hash=sha256:630159c9f4dbea161a6a2205c3011cc4f18ff381b189fff48bb39b9bf26ae608
     # via jsonschema
-oras==0.2.31 \
-    --hash=sha256:95c0a341359458747c2946dab47d584cc444d1f9d379b6d63fb7a84cabc54de4 \
-    --hash=sha256:b5541f6ae36191027af2c9cfbaef273709a8c860954879b6564f11e03b72007d
+oras==0.2.38 \
+    --hash=sha256:58482f78275cb5cc9fdf135248ca878a19204428a51bd3a1ca24c32714d35341 \
+    --hash=sha256:a97658086cea1e1ebb412a5b504005480c70de5d2e81a160d33e60fc187d42f4
     # via pipeline-migration-tool (pyproject.toml)
 packaging==25.0 \
     --hash=sha256:29572ef2b1f17581046b3a2227d5c611fb25ec70ca1ba8554b24b0e69331a484 \
@@ -136,9 +136,9 @@ referencing==0.36.2 \
     # via
     #   jsonschema
     #   jsonschema-specifications
-requests==2.32.4 \
-    --hash=sha256:27babd3cda2a6d50b30443204ee89830707d396671944c998b5975b031ac2b2c \
-    --hash=sha256:27d0316682c8a29834d3264820024b62a36942083d52caf2f14c0591336d3422
+requests==2.32.5 \
+    --hash=sha256:2462f94637a34fd532264295e186976db0f5d453d1cdd31473c85a6a161affb6 \
+    --hash=sha256:dbba0bac56e100853db0ea71b82b4dfd5fe2bf6d3754a8893c3af500cec7d7cf
     # via
     #   oras
     #   pipeline-migration-tool (pyproject.toml)
@@ -260,11 +260,11 @@ rpds-py==0.24.0 \
     # via
     #   jsonschema
     #   referencing
-ruamel.yaml==0.18.10 \
-    --hash=sha256:20c86ab29ac2153f80a428e1254a8adf686d3383df04490514ca3b79a362db58 \
-    --hash=sha256:30f22513ab2301b3d2b577adc121c6471f28734d3d9728581245f1e76468b4f1
+ruamel-yaml==0.18.15 \
+    --hash=sha256:148f6488d698b7a5eded5ea793a025308b25eca97208181b6a026037f391f701 \
+    --hash=sha256:dbfca74b018c4c3fba0b9cc9ee33e53c371194a9000e694995e620490fd40700
     # via pipeline-migration-tool (pyproject.toml)
-ruamel.yaml.clib==0.2.12 \
+ruamel-yaml-clib==0.2.12 \
     --hash=sha256:040ae85536960525ea62868b642bdb0c2cc6021c9f9d507810c0c604e66f5a7b \
     --hash=sha256:0467c5965282c62203273b838ae77c0d29d7638c8a4e3a1c8bdd3602c10904e4 \
     --hash=sha256:0b7e75b4965e1d4690e93021adfcecccbca7d61c7bddd8e22406ef2ff20d74ef \
@@ -296,7 +296,7 @@ ruamel.yaml.clib==0.2.12 \
     --hash=sha256:f66efbc1caa63c088dead1c4170d148eabc9b80d95fb75b6c92ac0aad2437d76 \
     --hash=sha256:fc4b630cd3fa2cf7fce38afa91d7cfe844a9f75d7f0f36393fa98815e911d987 \
     --hash=sha256:fd5415dded15c3822597455bc02bcd66e81ef8b7a48cb71a33628fc9fdde39df
-    # via ruamel.yaml
+    # via ruamel-yaml
 typing-extensions==4.13.2 \
     --hash=sha256:a439e7c04b49fec3e5d3e2beaa21755cadbbdc391694e28ccdd36ca4a1408f8c \
     --hash=sha256:e6c81219bd689f51865d9e372991c540bda33a0379d5573cddb9a3a23f7caaef

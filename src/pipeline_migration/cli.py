@@ -3,7 +3,7 @@ import logging
 
 from pipeline_migration.actions.add_task import register_cli as register_add_task_cli
 from pipeline_migration.actions.modify import register_cli as register_modify_cli
-from pipeline_migration.actions.migrate import register_cli as register_migrate_cli
+from pipeline_migration.actions.migrate.cli import register_cli as register_migrate_cli
 from pipeline_migration.actions.format import register_cli as register_format_cli
 
 logging.basicConfig(level=logging.DEBUG, format="%(levelname)s:%(asctime)s:%(name)s:%(message)s")

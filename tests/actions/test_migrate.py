@@ -9,36 +9,47 @@ from pathlib import Path
 from typing import Any, Final
 from unittest.mock import patch
 
-from pipeline_migration.utils import YAMLStyle, dump_yaml, load_yaml
-import responses
 import pytest
+import responses
 from responses import matchers
 
-from pipeline_migration.actions import migrate
-from pipeline_migration.actions.migrate import (
+from pipeline_migration.actions.migrate.models import (
+    PackageFile,
+    TaskBundleMigration,
+    TaskBundleUpgrade,
+)
+
+from pipeline_migration.actions.migrate.constants import (
     ANNOTATION_HAS_MIGRATION,
     ANNOTATION_IS_MIGRATION,
     ANNOTATION_TRUTH_VALUE,
     MIGRATION_IMAGE_TAG_LIKE_PATTERN,
-    MigrationApplyError,
-    MigrationImageTag,
-    MigrationImagesResolver,
-    determine_task_bundle_upgrades_range,
-    fetch_migration_file,
+)
+from pipeline_migration.actions.migrate.exceptions import (
     IncorrectMigrationAttachment,
-    LinkedMigrationsResolver,
-    SimpleIterationResolver,
-    TaskBundleMigration,
-    TaskBundleUpgrade,
+    MigrationApplyError,
+    MigrationResolveError,
+)
+from pipeline_migration.actions.migrate.resolvers import (
+    determine_task_bundle_upgrades_range,
+    drop_out_of_order_versions,
+    list_bundle_tags,
+)
+from pipeline_migration.actions.migrate.resolvers.migration_images import (
+    MigrationImageTag,
+)
+from pipeline_migration.actions.migrate.main import (
     TaskBundleUpgradesManager,
     MigrationFileOperation,
-    MigrationResolveError,
-    PackageFile,
+    fetch_migration_file,
 )
+from pipeline_migration.actions.migrate.resolvers.simple import SimpleIterationResolver
+from pipeline_migration.actions.migrate.resolvers.linked_migrations import LinkedMigrationsResolver
+from pipeline_migration.actions.migrate.resolvers.migration_images import MigrationImagesResolver
 from pipeline_migration.quay import QuayTagInfo
 from pipeline_migration.registry import Container
+from pipeline_migration.utils import YAMLStyle, dump_yaml, load_yaml
 from tests.utils import generate_digest, generate_sha256sum, generate_timestamp
-
 
 # Tags are listed from the latest to the oldest one.
 SAMPLE_TAGS_OF_NS_APP: Final = [
@@ -476,7 +487,8 @@ class TestResolveMigrations:
             return script_content
 
         monkeypatch.setattr(
-            "pipeline_migration.actions.migrate.fetch_migration_file", _fetch_migration_file
+            "pipeline_migration.actions.migrate.resolvers.simple.fetch_migration_file",
+            _fetch_migration_file,
         )
 
         manager.resolve_migrations()
@@ -599,7 +611,7 @@ class TestMigrationFileOperationHandlePipelineFile:
 
         monkeypatch.chdir(tmp_path)
         op = MigrationFileOperation(self.package_file.task_bundle_upgrades)
-        with patch.object(migrate, "dump_yaml", wraps=migrate.dump_yaml) as mock_dump_yaml:
+        with patch("pipeline_migration.actions.migrate.main.dump_yaml") as mock_dump_yaml:
             op.handle(self.package_file.file_path)
             assert mock_dump_yaml.call_count == expected_dump_yaml_calls
 
@@ -1069,8 +1081,8 @@ def test_drop_out_of_order_versions(tags_info, bundle_upgrade, expected):
         json={"tags": [], "page": 1, "has_additional": False},
     )
 
-    tags = migrate.list_bundle_tags(bundle_upgrade)
-    result = migrate.drop_out_of_order_versions(tags, bundle_upgrade)
+    tags = list_bundle_tags(bundle_upgrade)
+    result = drop_out_of_order_versions(tags, bundle_upgrade)
     assert result == tuple(expected)
 
 

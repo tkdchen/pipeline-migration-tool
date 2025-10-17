@@ -42,6 +42,7 @@ from pipeline_migration.actions.migrate.main import (
     TaskBundleUpgradesManager,
     MigrationFileOperation,
     fetch_migration_file,
+    TransitionToModifyCommandOperation,
 )
 from pipeline_migration.actions.migrate.resolvers.simple import SimpleIterationResolver
 from pipeline_migration.actions.migrate.resolvers.linked_migrations import LinkedMigrationsResolver
@@ -1282,3 +1283,79 @@ class TestMigrationImagesResolver:
         assert exc_info.group_contains(
             MigrationResolveError, match=r"Migration image [^ ]+ has multiple files:"
         )
+
+
+MIGRATION_SCRIPT_SIMPLE_USE = """\
+#!/usr/bin/env bash
+pipeline=$1
+pmt modify -f "$pipeline" task build-container add-param param_200 value_200
+"""
+
+MIGRATION_SCRIPT_WITH_CUSTOM_PIPELINE_FILENAME = """\
+#!/usr/bin/env bash
+build_pipeline=$1
+pmt modify -f "$build_pipeline" task build-container add-param param_200 value_200
+"""
+
+MIGRATION_SCRIPT_PMT_MULTIPLE_LINES = """\
+#!/usr/bin/env bash
+pipeline=$1
+if [[ 1 == 1 ]]; then
+    pmt \
+        \
+        modify \
+        \
+        -f "$pipeline" \
+        task build-container \
+        add-param param_200 value_200
+fi
+"""
+
+MIGRATION_SCRIPT_USING_YQ = """\
+#!/usr/bin/env bash
+pipeline=$1
+yq -i "expression" "$pipeline"
+"""
+
+# Known issue
+MIGRATION_SCRIPT_MIX_YQ_PMT = """\
+#!/usr/bin/env bash
+pipeline=$1
+yq -i "expression" "$pipeline"
+pmt modify -f "$build_pipeline" task build-container \
+    add-param param_200 value_200
+"""
+
+MIGRATION_SCRIPT_IGNORE_COMMENTS = """\
+#!/usr/bin/env bash
+pipeline=$1
+yq -i "expression" "$pipeline"
+if [[ param not present ]]; then
+    # Using pmt modify -f "$build_pipeline" task build-container add-param param_200 value_200
+    yq -i "(.spec.tasks | select(...)).name |= new" "$pipeline_file"
+fi
+"""
+
+
+@pytest.mark.parametrize(
+    "script,expected",
+    [
+        (MIGRATION_SCRIPT_SIMPLE_USE, True),
+        (MIGRATION_SCRIPT_WITH_CUSTOM_PIPELINE_FILENAME, True),
+        (MIGRATION_SCRIPT_PMT_MULTIPLE_LINES, True),
+        (MIGRATION_SCRIPT_MIX_YQ_PMT, True),
+        (MIGRATION_SCRIPT_USING_YQ, False),
+        (MIGRATION_SCRIPT_IGNORE_COMMENTS, False),
+    ],
+)
+def test_detect_pmt_modify_use(script, expected):
+    tb_upgrade = TaskBundleUpgrade(
+        dep_name=TASK_BUNDLE_CLONE,
+        current_value="0.2.6",
+        current_digest=generate_digest(),
+        new_value="0.3",
+        new_digest=generate_digest(),
+        migrations=[TaskBundleMigration("", script)],
+    )
+    op = TransitionToModifyCommandOperation([tb_upgrade])
+    assert op._all_migrations_utilize_modify_cmd() == expected

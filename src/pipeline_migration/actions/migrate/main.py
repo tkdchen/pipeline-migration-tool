@@ -1,4 +1,5 @@
 import json
+import logging
 import os.path
 import subprocess as sp
 import tempfile
@@ -110,7 +111,7 @@ class MigrationFileOperation(PipelineFileOperation):
         fd, temp_pipeline_file = tempfile.mkstemp(suffix="-pipeline")
         os.close(fd)
 
-        pipeline_spec = {"spec": original_pipeline_doc["spec"]["pipelineSpec"]}
+        pipeline_spec = {"kind": "Pipeline", "spec": original_pipeline_doc["spec"]["pipelineSpec"]}
         dump_yaml(temp_pipeline_file, pipeline_spec, style=yaml_style)
         origin_checksum = file_checksum(temp_pipeline_file)
 
@@ -120,6 +121,42 @@ class MigrationFileOperation(PipelineFileOperation):
             modified_pipeline = load_yaml(temp_pipeline_file, style=yaml_style)
             original_pipeline_doc["spec"]["pipelineSpec"] = modified_pipeline["spec"]
             dump_yaml(file_path, original_pipeline_doc, style=yaml_style)
+
+
+class TransitionToModifyCommandOperation(MigrationFileOperation):
+
+    def __init__(self, task_bundle_upgrades: list[TaskBundleUpgrade]):
+        super().__init__(task_bundle_upgrades)
+        self.logger = logging.getLogger("migrate.transition-to-modify")
+        self._transition_is_done = self._all_migrations_utilize_modify_cmd()
+        if self._transition_is_done:
+            self.logger.info("All migration scripts are using pmt-modify command.")
+        else:
+            self.logger.info(
+                "Not all migration scripts are using pmt-modify command. "
+                "Using legacy way to handle pipeline file for applying migrations."
+            )
+
+    def _all_migrations_utilize_modify_cmd(self) -> bool:
+        return all(
+            migration.is_pmt_modify_used
+            for bundle_upgrade in self._task_bundle_upgrades
+            for migration in bundle_upgrade.migrations
+        )
+
+    def handle_pipeline_file(self, file_path: FilePath, loaded_doc: Any, style: YAMLStyle) -> None:
+        if self._transition_is_done:
+            self._apply_migration(file_path)
+        else:
+            super().handle_pipeline_file(file_path, loaded_doc, style)
+
+    def handle_pipeline_run_file(
+        self, file_path: FilePath, loaded_doc: Any, style: YAMLStyle
+    ) -> None:
+        if self._transition_is_done:
+            self._apply_migration(file_path)
+        else:
+            super().handle_pipeline_run_file(file_path, loaded_doc, style)
 
 
 class TaskBundleUpgradesManager:
@@ -189,7 +226,7 @@ class TaskBundleUpgradesManager:
                 bundle_upgrades = [
                     u for u in package_file.task_bundle_upgrades if u.dep_name not in skip_bundles
                 ]
-                op = MigrationFileOperation(bundle_upgrades)
+                op = TransitionToModifyCommandOperation(bundle_upgrades)
                 op.handle(package_file.file_path)
             except Exception as e:
                 errors.append(e)

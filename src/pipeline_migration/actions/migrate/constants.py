@@ -53,3 +53,11 @@ MIGRATION_IMAGE_TAG_REGEX: Final = re.compile(
 )
 
 MIGRATION_IMAGE_TAG_LIKE_PATTERN: Final = r"migration-%.%-%-%"
+
+# Match pipeline-migration-tool CLI.
+# Line continuation is matched by [\s\\]+
+# Command name can be either pipeline-migration-tool or pmt.
+REGEX_PMT_MODIFY_USAGE = re.compile(
+    r"^\s*(pipeline-migration-tool|pmt)[\s\\]+modify\s",
+    re.MULTILINE,
+)

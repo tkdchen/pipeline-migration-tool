@@ -628,7 +628,7 @@ class TestMigrateTaskBundleUpgrade:
         listRepoTags endpoint and migration script failure. The expected result is:
 
         * Migrations are resolved for the all upgrades.
-        * All migrations are attemped for bundle lint.
+        * All migrations are attempted for bundle lint.
         """
 
         caplog.set_level(logging.DEBUG)
@@ -732,6 +732,82 @@ class TestMigrateTaskBundleUpgrade:
         # signature-scan task is handled
         msg_regex = rf"Migration search stops at {TASK_BUNDLE_SIGNATURE_SCAN}"
         assert re.search(msg_regex, captured_logs)
+
+    @responses.activate
+    @pytest.mark.parametrize("pipeline_file", ["pr.yaml", "push.yaml"])
+    @pytest.mark.parametrize("all_use_pmt_modify", [True, False])
+    def test_transition_from_yq_i_to_pmt_modify(
+        self,
+        pipeline_file,
+        all_use_pmt_modify,
+        caplog,
+        monkeypatch,
+        component_a_repo,
+        mock_migration_images,
+    ) -> None:
+        """Test apply migrations to package files directly if all migrations use pmt-modify"""
+
+        package_file: Final = component_a_repo.tekton_dir / pipeline_file
+        bundle_upgrades = [
+            {
+                "depName": TASK_BUNDLE_CLONE,
+                "currentValue": "0.1.3",
+                "currentDigest": "sha256:021020bc57b1",
+                "newValue": "0.2",
+                "newDigest": "sha256:d1366e3650bb",
+                "depTypes": ["tekton-bundle"],
+                "packageFile": str(package_file),
+                "parentDir": package_file.parent.name,
+            },
+        ]
+
+        caplog.set_level(logging.DEBUG)
+        mock_has_migration_images(TASK_BUNDLE_CLONE, True)
+
+        migration_scripts = [
+            # This migration uses a custom variable name referencing the pass-in Pipeline file.
+            b'#!/usr/bin/env bash\npmt modify -f "$pipeline" task task-a add-param p v',
+        ]
+        if all_use_pmt_modify:
+            # This migration uses the standard variable referencing the pass-in Pipeline file.
+            migration_scripts.append(
+                b"#!/usr/bin/env bash\n"
+                b'pmt modify -f "$pipeline_file" task task-b remove-param param1',
+            )
+        else:
+            migration_scripts.append(b"#!/usr/bin/env bash\nyq -i ((...) |= ...) $pipeline_file")
+
+        ts_gen = generate_timestamp()
+        mock_migration_images(
+            TASK_BUNDLE_CLONE,
+            [
+                {"name": f"migration-0.1.3-{generate_sha256sum()}-{ts_gen()}"},
+                {"name": f"migration-0.2-{generate_sha256sum()}-{ts_gen()}"},
+            ],
+            migration_scripts=migration_scripts,
+        )
+
+        def subprocess_run(cmd, *args, **kwargs):
+            pipeline_file = bundle_upgrades[0]["packageFile"]
+            assert cmd[-1] == pipeline_file, "Package file is not passed."
+            if not all_use_pmt_modify:
+                assert (
+                    Path(pipeline_file).read_text().startswith("kind: Pipeline")
+                ), "Pipeline file does not have kind Pipeline."
+            assert Path(cmd[-2]).read_text() in migration_scripts
+            return subprocess.CompletedProcess(cmd, 0, stdout="migration is done.")
+
+        monkeypatch.setattr("subprocess.run", subprocess_run)
+
+        cli_cmd = ["pmt", "migrate", "-u", json.dumps(bundle_upgrades)]
+        monkeypatch.setattr("sys.argv", cli_cmd)
+
+        entry_point()
+
+        if all_use_pmt_modify:
+            assert "All migration scripts are using pmt-modify command" in caplog.text
+        else:
+            assert "Not all migration scripts are using pmt-modify command" in caplog.text
 
 
 def test_entry_point_should_catch_error(monkeypatch, caplog):

@@ -1,4 +1,7 @@
+from functools import cached_property
 from dataclasses import dataclass, field
+
+from pipeline_migration.actions.migrate.constants import REGEX_PMT_MODIFY_USAGE
 
 
 @dataclass
@@ -7,6 +10,10 @@ class TaskBundleMigration:
     task_bundle: str
     # Content of the script
     migration_script: str
+
+    @cached_property
+    def is_pmt_modify_used(self) -> bool:
+        return REGEX_PMT_MODIFY_USAGE.search(self.migration_script) is not None
 
 
 @dataclass

@@ -320,7 +320,7 @@ def create_yaml_file(tmp_path):
 def mock_migration_images(mock_get_manifest_for_migration):
     """Mock for MigrationImagesResolver to discover and fetch migration images"""
 
-    def _mock(image_repo: str, tags: list[dict]):
+    def _mock(image_repo: str, tags: list[dict], migration_scripts: list[str] | None = None):
         c = Container(image_repo)
         api_url = f"https://quay.io/api/v1/repository/{c.api_prefix}/tag/"
         responses.get(
@@ -337,8 +337,10 @@ def mock_migration_images(mock_get_manifest_for_migration):
             ],
         )
 
+        if not migration_scripts:
+            migration_scripts = [""] * len(tags)
         # Mock for Registry.pull()
-        for tag in tags:
+        for tag, script_content in zip(tags, migration_scripts):
             tag_name = tag["name"]
             c = Container(f"{image_repo}:{tag_name}")
             migration_image_tag = MigrationImageTag.parse(tag_name)
@@ -347,6 +349,7 @@ def mock_migration_images(mock_get_manifest_for_migration):
                 manifest_json = mock_get_manifest_for_migration(c, f"{version}.sh")
                 # Mock get_blob
                 blob_digest = manifest_json["layers"][0]["digest"]
-                responses.get(f"https://{c.get_blob_url(blob_digest)}", body=f"echo {version}")
+                body = script_content or f"echo {version}"
+                responses.get(f"https://{c.get_blob_url(blob_digest)}", body=body)
 
     return _mock

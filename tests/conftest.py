@@ -8,6 +8,14 @@ import tempfile
 import responses
 from responses import matchers
 
+from pipeline_migration.actions.migrate.constants import (
+    ANNOTATION_HAS_MIGRATION,
+    ANNOTATION_IS_MIGRATION,
+    ANNOTATION_PREVIOUS_MIGRATION_BUNDLE,
+    ANNOTATION_TRUTH_VALUE,
+    MIGRATION_IMAGE_TAG_LIKE_PATTERN,
+)
+from pipeline_migration.actions.migrate.resolvers.migration_images import MigrationImageTag
 from pipeline_migration.types import DescriptorT, ManifestT
 from pipeline_migration.registry import (
     MEDIA_TYPE_OCI_EMTPY_V1,
@@ -17,14 +25,7 @@ from pipeline_migration.registry import (
     MEDIA_TYPE_OCI_IMAGE_LAYER_V1_TAR_GZ,
     MEDIA_TYPE_OCI_IMAGE_MANIFEST_V1,
 )
-from pipeline_migration.actions.migrate import (
-    ANNOTATION_HAS_MIGRATION,
-    ANNOTATION_IS_MIGRATION,
-    ANNOTATION_PREVIOUS_MIGRATION_BUNDLE,
-    ANNOTATION_TRUTH_VALUE,
-    MIGRATION_IMAGE_TAG_LIKE_PATTERN,
-    MigrationImageTag,
-)
+
 from tests.utils import generate_digest, RepoPath
 
 

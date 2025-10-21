@@ -14,13 +14,15 @@ from oras.types import container_type
 from responses import matchers
 
 from pipeline_migration.cli import entry_point
-from pipeline_migration.actions.migrate import (
+from pipeline_migration.actions.migrate.constants import (
     ANNOTATION_HAS_MIGRATION,
     ANNOTATION_IS_MIGRATION,
     ANNOTATION_PREVIOUS_MIGRATION_BUNDLE,
     MIGRATION_IMAGE_TAG_LIKE_PATTERN,
+)
+from pipeline_migration.actions.migrate.exceptions import InvalidRenovateUpgradesData
+from pipeline_migration.actions.migrate.main import (
     clean_upgrades,
-    InvalidRenovateUpgradesData,
 )
 from pipeline_migration.registry import (
     Container,
@@ -429,7 +431,16 @@ class TestMigrateTaskBundleUpgrade:
     ):
         caplog.set_level(level=logging.INFO, logger="migrate")
 
-        monkeypatch.setattr("pipeline_migration.actions.migrate.Registry", MockRegistry)
+        monkeypatch.setattr("pipeline_migration.actions.migrate.main.Registry", MockRegistry)
+        monkeypatch.setattr(
+            "pipeline_migration.actions.migrate.resolvers.simple.Registry", MockRegistry
+        )
+        monkeypatch.setattr(
+            "pipeline_migration.actions.migrate.resolvers.linked_migrations.Registry", MockRegistry
+        )
+        monkeypatch.setattr(
+            "pipeline_migration.actions.migrate.resolvers.migration_images.Registry", MockRegistry
+        )
         self._mock_quay_list_tags()
 
         pipeline_file = self._mock_pipeline_file(tmp_path, pipeline_yaml_with_various_indent_styles)
@@ -587,7 +598,16 @@ class TestMigrateTaskBundleUpgrade:
             },
         ]
 
-        monkeypatch.setattr("pipeline_migration.actions.migrate.Registry", MockRegistry)
+        monkeypatch.setattr("pipeline_migration.actions.migrate.main.Registry", MockRegistry)
+        monkeypatch.setattr(
+            "pipeline_migration.actions.migrate.resolvers.simple.Registry", MockRegistry
+        )
+        monkeypatch.setattr(
+            "pipeline_migration.actions.migrate.resolvers.linked_migrations.Registry", MockRegistry
+        )
+        monkeypatch.setattr(
+            "pipeline_migration.actions.migrate.resolvers.migration_images.Registry", MockRegistry
+        )
         self._mock_quay_list_tags()
 
         cli_cmd = ["pmt", "migrate", "-u", json.dumps(upgrades)]
@@ -612,7 +632,16 @@ class TestMigrateTaskBundleUpgrade:
         """
 
         caplog.set_level(logging.DEBUG)
-        monkeypatch.setattr("pipeline_migration.actions.migrate.Registry", MockRegistry)
+        monkeypatch.setattr("pipeline_migration.actions.migrate.main.Registry", MockRegistry)
+        monkeypatch.setattr(
+            "pipeline_migration.actions.migrate.resolvers.simple.Registry", MockRegistry
+        )
+        monkeypatch.setattr(
+            "pipeline_migration.actions.migrate.resolvers.linked_migrations.Registry", MockRegistry
+        )
+        monkeypatch.setattr(
+            "pipeline_migration.actions.migrate.resolvers.migration_images.Registry", MockRegistry
+        )
 
         package_file = component_a_repo.tekton_dir / "push.yaml"
         bundle_upgrades = [

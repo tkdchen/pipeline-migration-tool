@@ -202,5 +202,5 @@ def test_apply_migration(
 
     entry_point()
 
-    for meth in assertion_methods:
-        meth(package_file.read_text())
+    for method in assertion_methods:
+        method(package_file.read_text())

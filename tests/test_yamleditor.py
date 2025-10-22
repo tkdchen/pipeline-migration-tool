@@ -907,6 +907,98 @@ class TestEditYAMLEntry:
 
         assert read_file_content(simple_yaml_file) == expected
 
+    def test_replace_string_scalar_in_dict(self, simple_yaml_file):
+        """Test replacing a string scalar value in a dictionary."""
+        style = YAMLStyle.detect(simple_yaml_file)
+        editor = EditYAMLEntry(simple_yaml_file, style)
+
+        editor.replace(["name"], "updated-pipeline")
+
+        expected = dedent(
+            """\
+            name: updated-pipeline
+            spec:
+              tasks:
+              - name: task1
+                taskRef:
+                  name: clone
+                params:
+                - name: repo-url
+                  value: "https://example.com/example/repo"
+            """
+        )
+
+        assert read_file_content(simple_yaml_file) == expected
+
+    def test_replace_nested_scalar(self, simple_yaml_file):
+        """Test replacing a deeply nested scalar value."""
+        style = YAMLStyle.detect(simple_yaml_file)
+        editor = EditYAMLEntry(simple_yaml_file, style)
+
+        editor.replace(["spec", "tasks", 0, "taskRef", "name"], "git-clone")
+
+        expected = dedent(
+            """\
+            name: test-pipeline
+            spec:
+              tasks:
+              - name: task1
+                taskRef:
+                  name: git-clone
+                params:
+                - name: repo-url
+                  value: "https://example.com/example/repo"
+            """
+        )
+
+        assert read_file_content(simple_yaml_file) == expected
+
+    def test_replace_scalar_in_list_item(self, simple_yaml_file):
+        """Test replacing a scalar value within a list item."""
+        style = YAMLStyle.detect(simple_yaml_file)
+        editor = EditYAMLEntry(simple_yaml_file, style)
+
+        editor.replace(["spec", "tasks", 0, "params", 0, "value"], "https://github.com/new/repo")
+
+        expected = dedent(
+            """\
+            name: test-pipeline
+            spec:
+              tasks:
+              - name: task1
+                taskRef:
+                  name: clone
+                params:
+                - name: repo-url
+                  value: "https://github.com/new/repo"
+            """
+        )
+
+        assert read_file_content(simple_yaml_file) == expected
+
+    def test_replace_scalar_in_list_item_name(self, simple_yaml_file):
+        """Test replacing a scalar name value within a list item."""
+        style = YAMLStyle.detect(simple_yaml_file)
+        editor = EditYAMLEntry(simple_yaml_file, style)
+
+        editor.replace(["spec", "tasks", 0, "params", 0, "name"], "repository-url")
+
+        expected = dedent(
+            """\
+            name: test-pipeline
+            spec:
+              tasks:
+              - name: task1
+                taskRef:
+                  name: clone
+                params:
+                - name: repository-url
+                  value: "https://example.com/example/repo"
+            """
+        )
+
+        assert read_file_content(simple_yaml_file) == expected
+
     @pytest.mark.parametrize(
         "yaml_path,expected_lineno",
         [
@@ -1340,6 +1432,88 @@ class TestEditYAMLEntryFlowStyle:
               a: 1
               b: 2
               c: 3
+            """
+        )
+
+        assert read_file_content(flow_style_map_file) == expected
+
+    def test_replace_scalar_in_flow_style_dict(self, simple_yaml_file_flow):
+        """Test replacing a scalar value in a flow-style dictionary."""
+        editor = EditYAMLEntry(simple_yaml_file_flow)
+
+        editor.replace(["spec", "tasks", 0, "taskRef", "name"], "git-clone")
+
+        expected = dedent(
+            """\
+            name: test-pipeline
+            spec:
+              tasks:
+                - name: task1
+                  taskRef:
+                    name: git-clone
+                  params: [{name: repo-url, value: https://example.com/example/repo}]
+            """
+        )
+
+        assert read_file_content(simple_yaml_file_flow) == expected
+
+    def test_replace_scalar_in_flow_style_list(self, simple_yaml_file_flow):
+        """Test replacing a scalar value within a flow-style list."""
+        editor = EditYAMLEntry(simple_yaml_file_flow)
+
+        editor.replace(["spec", "tasks", 0, "params", 0, "value"], "https://github.com/new/repo")
+
+        expected = dedent(
+            """\
+            name: test-pipeline
+            spec:
+              tasks:
+                - name: task1
+                  taskRef: {name: clone}
+                  params:
+                  - name: repo-url
+                    value: https://github.com/new/repo
+            """
+        )
+
+        assert read_file_content(simple_yaml_file_flow) == expected
+
+    def test_replace_scalar_in_nested_flow_style(self, flow_style_yaml_file):
+        """Test replacing a scalar in deeply nested flow-style structure."""
+        editor = EditYAMLEntry(flow_style_yaml_file)
+
+        editor.replace(
+            ["spec", "tasks", 0, "params", 0, "value"], "https://github.com/updated/repo"
+        )
+
+        expected = dedent(
+            """\
+            metadata: {name: flow-pipeline}
+            spec:
+              tasks:
+              - name: clone
+                taskRef: {name: git-clone}
+                params:
+                - name: url
+                  value: https://github.com/updated/repo
+                - {name: revision, value: main}
+              - {name: build, taskRef: {name: build}, params: [{name: IMAGE, value: buildah}]}
+            """
+        )
+
+        assert read_file_content(flow_style_yaml_file) == expected
+
+    def test_replace_scalar_in_flow_style_mapping(self, flow_style_map_file):
+        """Test replacing a scalar value in a flow-style mapping."""
+        editor = EditYAMLEntry(flow_style_map_file)
+
+        editor.replace(["config", "a"], 10)
+
+        expected = dedent(
+            """\
+            config:
+              a: 10
+              b: 2
             """
         )
 

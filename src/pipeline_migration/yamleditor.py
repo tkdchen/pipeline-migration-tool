@@ -5,7 +5,7 @@ import tempfile
 import textwrap
 from pathlib import Path
 from collections.abc import Sequence
-from typing import Union, TypeAlias, List, Tuple
+from typing import Union, TypeAlias, List, Tuple, Any
 from io import StringIO
 
 from ruamel.yaml import CommentedMap, CommentedSeq
@@ -73,7 +73,7 @@ class EditYAMLEntry:
         After each change to yaml file, data must be invalidated"""
         del self.data
 
-    def _get_path_stack(self, path: YAMLPath) -> PathStack:
+    def _get_path_stack(self, path: YAMLPath, allow_scalar: bool = False) -> PathStack:
         """Get path stack of the given path.
         Each stack item consist of tuple (Node, index), where node is
         yaml entry mapping(dict) or sequence(list) and index is str or int of the child
@@ -81,6 +81,8 @@ class EditYAMLEntry:
 
         :param path: path to the yaml element in the yaml doc
         :type path: YAMLPath
+        :param allow_scalar: if True, allows path to point to scalar values (non dict/list)
+        :type allow_scalar: bool
         :returns: path stack representing path to each node on the path to the terminal node
         """
         path_stack: PathStack = []
@@ -90,8 +92,14 @@ class EditYAMLEntry:
             path_stack.append((current_data, p))
             current_data = current_data[p]
         if not isinstance(current_data, (dict, list)):
-            raise ValueError(f"Path must point to list/dict object. Given path {path} does not.")
-        path_stack.append((current_data, None))  # terminal node
+            if not allow_scalar:
+                raise ValueError(
+                    f"Path must point to list/dict object. Given path {path} does not."
+                )
+            # For scalars, we don't add a terminal node - the last item in path_stack
+            # already points to the parent and the key/index of the scalar
+        else:
+            path_stack.append((current_data, None))  # terminal node
         return path_stack
 
     def insert(self, path: YAMLPath, data: dict | list):
@@ -128,15 +136,37 @@ class EditYAMLEntry:
         )
         self.invalidate_yaml_data()
 
-    def replace(self, path: YAMLPath, data: dict | list):
-        """Replace existing sequence or mapping of the given path with the new data.
+    def replace(self, path: YAMLPath, data: Any):
+        """Replace existing sequence, mapping or scalar of the given path with the new data.
 
-        :param path: path in yaml, target object must be list or dict, not a scalar
+        For scalars, the parent object is updated since scalars don't have line numbers.
+
+        :param path: path in yaml, can point to list, dict, or scalar value
         :type path: YAMLPath
         :param data: data to be replaced at path
-        :type data: dict | list
+        :type data: Any
         """
-        path_stack = self._get_path_stack(path)
+        # try to get path stack, allowing scalars
+        path_stack = self._get_path_stack(path, allow_scalar=True)
+
+        # check if we're dealing with a scalar (no terminal node with None)
+        is_scalar = path_stack[-1][1] is not None
+
+        if is_scalar:
+            # for scalars, we need to update the parent object
+            if len(path_stack) < 1:
+                raise ValueError("Cannot replace root scalar value")
+
+            parent_node, scalar_key = path_stack[-1]
+
+            # update the parent with the new scalar value
+            parent_node = copy.deepcopy(parent_node)  # avoid reusing reference
+            parent_node[scalar_key] = data
+
+            # now replace the parent object
+            parent_path = path[:-1]
+            return self.replace(parent_path, parent_node)
+
         last_node, _ = path_stack[-1]
 
         if is_flow_style_seq(last_node):
@@ -295,7 +325,7 @@ class EditYAMLEntry:
 
         return EOF
 
-    def _gen_yaml_str(self, data: dict | list, col: int, seq_block=False) -> str:
+    def _gen_yaml_str(self, data: Any, col: int, seq_block=False) -> str:
         if seq_block:
             data = [data]
         yaml = create_yaml_obj(style=self.style)
@@ -318,7 +348,7 @@ class EditYAMLEntry:
         return indented
 
     def _pre_process_flow_style_replace(
-        self, path_stack, data: dict | list
+        self, path_stack, data: Any
     ) -> Tuple[PathStack, dict | list]:
         """Flow style isn't fully supported, to comply with it, we will just use the yaml parser
         to generate  the whole block since the first block style parent entry.
@@ -330,7 +360,7 @@ class EditYAMLEntry:
         :param path_stack: current path stack pointing to the desired object
         :type path_stack: PathStack
         :param data: current data for replacement
-        :type data: dict | list
+        :type data: Any
         :returns: tuple that contains new path stack and new data to be used in replacement
         """
         if not path_stack:
@@ -368,6 +398,10 @@ class EditYAMLEntry:
             new_parent[parent_idx] = data
             new_parent.fa.set_block_style()
             data = new_parent
+
+        # mark new last node as terminal
+        node, _ = path_stack.pop()
+        path_stack.append((node, None))
 
         return path_stack, data
 

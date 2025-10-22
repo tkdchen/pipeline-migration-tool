@@ -90,7 +90,7 @@ def yaml_path_type(param: str) -> YAMLPath:
         return yaml_path
 
 
-def _yaml_from_value_param(value: str) -> dict | list:
+def _yaml_from_value_param(value: str, allow_scalar: bool = False) -> Any:
     """Parses and validates value param"""
 
     def make_block_style_yaml(y):
@@ -111,7 +111,7 @@ def _yaml_from_value_param(value: str) -> dict | list:
     yaml = create_yaml_obj()
     loaded_value = yaml.load(value)
 
-    if not isinstance(loaded_value, (list, dict)):
+    if not allow_scalar and not isinstance(loaded_value, (list, dict)):
         raise ValueError("Value parameter must be YAML sequence or map")
 
     make_block_style_yaml(loaded_value)
@@ -119,10 +119,20 @@ def _yaml_from_value_param(value: str) -> dict | list:
     return loaded_value
 
 
-def yaml_value_type(param: str) -> dict | list:
+def yaml_value_type(param: str) -> Any:
     "Argparser custom type for yaml value validation"
     try:
         yaml_path = _yaml_from_value_param(param)
+    except Exception as e:
+        raise argparse.ArgumentTypeError(str(e))
+    else:
+        return yaml_path
+
+
+def yaml_value_allowed_scalar_type(param: str) -> Any:
+    """Argparser custom type for yaml value validation, with allowed scalar value"""
+    try:
+        yaml_path = _yaml_from_value_param(param, allow_scalar=True)
     except Exception as e:
         raise argparse.ArgumentTypeError(str(e))
     else:
@@ -175,7 +185,7 @@ def register_cli(subparser) -> None:
     subparser_replace.add_argument(
         "yaml_path",
         help=(
-            "YAML path (in YAML format). Must point to a sequence or a map item. "
+            "YAML path (in YAML format). "
             "It's the same path as returned by yq's path function (list of indexes)"
         ),
         metavar="YAML-PATH",
@@ -183,9 +193,9 @@ def register_cli(subparser) -> None:
     )
     subparser_replace.add_argument(
         "value",
-        help="YAML sequence or map (in YAML format) to be used as the replacement)",
+        help="YAML value (in YAML format) to be used as the replacement.",
         metavar="VALUE",
-        type=yaml_value_type,
+        type=yaml_value_allowed_scalar_type,
     )
 
     subparser_replace.set_defaults(action=action_replace)
@@ -214,7 +224,7 @@ class ModGenericBase(PipelineFileOperation):
     def __init__(self, yaml_path: YAMLPath):
         self.yaml_path = yaml_path
 
-    def validate_yaml_path(self, loaded_doc: Any):
+    def validate_yaml_path(self, loaded_doc: Any, allow_scalar: bool = False):
         def get_path_doc(ypath):
             """:raises KeyError: when path doesn't exist"""
             tmp_doc = copy.copy(loaded_doc)
@@ -229,7 +239,7 @@ class ModGenericBase(PipelineFileOperation):
                 f"Given YAML path {self.yaml_path} doesn't exist in the doc"
             )
         else:
-            if not isinstance(tmp_doc, (CommentedSeq, CommentedMap)):
+            if not allow_scalar and not isinstance(tmp_doc, (CommentedSeq, CommentedMap)):
                 raise RuntimeError(
                     f"Provided YAML path {self.yaml_path} must point to sequence or map"
                 )
@@ -268,13 +278,13 @@ def action_insert(args) -> None:
 
 
 class ModGenericReplace(ModGenericBase):
-    def __init__(self, yaml_path: YAMLPath, value: dict | list):
+    def __init__(self, yaml_path: YAMLPath, value: Any):
         super().__init__(yaml_path)
         self.value = value
 
     def handle_pipeline_file(self, file_path: FilePath, loaded_doc: Any, style: YAMLStyle) -> None:
         logger.info("Replacing content at YAML path %s in file %s", self.yaml_path, file_path)
-        self.validate_yaml_path(loaded_doc)
+        self.validate_yaml_path(loaded_doc, allow_scalar=True)
         yamledit = EditYAMLEntry(file_path, style=style)
         yamledit.replace(self.yaml_path, self.value)
 

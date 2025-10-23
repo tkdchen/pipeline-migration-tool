@@ -208,7 +208,7 @@ def register_cli(subparser) -> None:
     subparser_remove.add_argument(
         "yaml_path",
         help=(
-            "YAML path (in YAML format). Must point to a sequence or a map item. "
+            "YAML path (in YAML format). "
             "It's the same path as returned by yq's path function (list of indexes)"
         ),
         metavar="YAML-PATH",
@@ -309,7 +309,7 @@ class ModGenericRemove(ModGenericBase):
 
     def handle_pipeline_file(self, file_path: FilePath, loaded_doc: Any, style: YAMLStyle) -> None:
         logger.info("Removing YAML path %s in file %s", self.yaml_path, file_path)
-        self.validate_yaml_path(loaded_doc)
+        self.validate_yaml_path(loaded_doc, allow_scalar=True)
         yamledit = EditYAMLEntry(file_path, style=style)
         yamledit.delete(self.yaml_path)
 

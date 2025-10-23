@@ -822,6 +822,71 @@ class TestEditYAMLEntry:
             content = f.read()
             assert content == expected
 
+    def test_delete_scalar_from_dict(self, simple_yaml_file):
+        """Test deleting a scalar value from a dictionary."""
+        style = YAMLStyle.detect(simple_yaml_file)
+        editor = EditYAMLEntry(simple_yaml_file, style)
+
+        editor.delete(["name"])
+
+        expected = dedent(
+            """\
+            spec:
+              tasks:
+              - name: task1
+                taskRef:
+                  name: clone
+                params:
+                - name: repo-url
+                  value: "https://example.com/example/repo"
+            """
+        )
+
+        assert read_file_content(simple_yaml_file) == expected
+
+    def test_delete_nested_scalar(self, simple_yaml_file):
+        """Test deleting a deeply nested scalar value."""
+        style = YAMLStyle.detect(simple_yaml_file)
+        editor = EditYAMLEntry(simple_yaml_file, style)
+
+        editor.delete(["spec", "tasks", 0, "taskRef", "name"])
+
+        expected = dedent(
+            """\
+            name: test-pipeline
+            spec:
+              tasks:
+              - name: task1
+                params:
+                - name: repo-url
+                  value: "https://example.com/example/repo"
+            """
+        )
+
+        assert read_file_content(simple_yaml_file) == expected
+
+    def test_delete_scalar_from_list_item(self, simple_yaml_file):
+        """Test deleting a scalar value from within a list item."""
+        style = YAMLStyle.detect(simple_yaml_file)
+        editor = EditYAMLEntry(simple_yaml_file, style)
+
+        editor.delete(["spec", "tasks", 0, "params", 0, "value"])
+
+        expected = dedent(
+            """\
+            name: test-pipeline
+            spec:
+              tasks:
+              - name: task1
+                taskRef:
+                  name: clone
+                params:
+                - name: repo-url
+            """
+        )
+
+        assert read_file_content(simple_yaml_file) == expected
+
     def test_file_not_found(self):
         """Test error when YAML file doesn't exist."""
         non_existent_path = Path("non_existent.yaml")
@@ -1513,6 +1578,81 @@ class TestEditYAMLEntryFlowStyle:
             """\
             config:
               a: 10
+              b: 2
+            """
+        )
+
+        assert read_file_content(flow_style_map_file) == expected
+
+    def test_delete_scalar_in_flow_style_dict(self, simple_yaml_file_flow):
+        """Test deleting a scalar value in a flow-style dictionary."""
+        editor = EditYAMLEntry(simple_yaml_file_flow)
+
+        editor.delete(["spec", "tasks", 0, "taskRef", "name"])
+
+        expected = dedent(
+            """\
+            name: test-pipeline
+            spec:
+              tasks:
+                - name: task1
+                  params: [{name: repo-url, value: https://example.com/example/repo}]
+            """
+        )
+
+        assert read_file_content(simple_yaml_file_flow) == expected
+
+    def test_delete_scalar_in_flow_style_list(self, simple_yaml_file_flow):
+        """Test deleting a scalar value within a flow-style list."""
+        editor = EditYAMLEntry(simple_yaml_file_flow)
+
+        editor.delete(["spec", "tasks", 0, "params", 0, "value"])
+
+        expected = dedent(
+            """\
+            name: test-pipeline
+            spec:
+              tasks:
+                - name: task1
+                  taskRef: {name: clone}
+                  params:
+                  - name: repo-url
+            """
+        )
+
+        assert read_file_content(simple_yaml_file_flow) == expected
+
+    def test_delete_scalar_in_nested_flow_style(self, flow_style_yaml_file):
+        """Test deleting a scalar in deeply nested flow-style structure."""
+        editor = EditYAMLEntry(flow_style_yaml_file)
+
+        editor.delete(["spec", "tasks", 0, "params", 0, "value"])
+
+        expected = dedent(
+            """\
+            metadata: {name: flow-pipeline}
+            spec:
+              tasks:
+              - name: clone
+                taskRef: {name: git-clone}
+                params:
+                - name: url
+                - {name: revision, value: main}
+              - {name: build, taskRef: {name: build}, params: [{name: IMAGE, value: buildah}]}
+            """
+        )
+
+        assert read_file_content(flow_style_yaml_file) == expected
+
+    def test_delete_scalar_in_flow_style_mapping(self, flow_style_map_file):
+        """Test deleting a scalar value in a flow-style mapping."""
+        editor = EditYAMLEntry(flow_style_map_file)
+
+        editor.delete(["config", "a"])
+
+        expected = dedent(
+            """\
+            config:
               b: 2
             """
         )

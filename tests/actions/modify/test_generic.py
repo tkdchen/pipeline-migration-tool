@@ -682,6 +682,173 @@ class TestModGenericRemove:
         actual = read_file_content(pipeline_yaml_file)
         assert actual == expected
 
+    def test_remove_scalar_from_dict(self, simple_yaml_file):
+        """Test removing a scalar value from a dictionary."""
+        op = ModGenericRemove(["root", "level1", "config", "setting1"])
+
+        loaded_doc = load_yaml(simple_yaml_file)
+        style = YAMLStyle.detect(simple_yaml_file)
+
+        op.handle_pipeline_file(simple_yaml_file, loaded_doc, style)
+
+        expected = dedent(
+            """\
+            root:
+              level1:
+                items:
+                  - name: item1
+                    value: 1
+                  - name: item2
+                    value: 2
+                config:
+                  setting2: "value2"
+            """
+        )
+
+        actual = read_file_content(simple_yaml_file)
+        assert actual == expected
+
+    def test_remove_nested_scalar_with_cascade(self, pipeline_yaml_file):
+        """Test removing a nested scalar value that triggers cascade deletion."""
+        op = ModGenericRemove(["spec", "tasks", 0, "taskRef", "name"])
+
+        loaded_doc = load_yaml(pipeline_yaml_file)
+        style = YAMLStyle.detect(pipeline_yaml_file)
+
+        op.handle_pipeline_file(pipeline_yaml_file, loaded_doc, style)
+
+        expected = dedent(
+            """\
+            apiVersion: tekton.dev/v1
+            kind: Pipeline
+            metadata:
+              name: test-pipeline
+            spec:
+              tasks:
+                - name: clone
+                  params:
+                    - name: url
+                      value: "https://github.com/example/repo"
+                    - name: revision
+                      value: "main"
+                - name: build
+                  taskRef:
+                    name: buildah
+                  params:
+                    - name: IMAGE
+                      value: "registry.io/app:latest"
+              params:
+                - name: repo-url
+                  value: "https://github.com/default/repo"
+            """
+        )
+
+        actual = read_file_content(pipeline_yaml_file)
+        assert actual == expected
+
+    def test_remove_scalar_from_list_item(self, simple_yaml_file):
+        """Test removing a scalar value from within a list item."""
+        op = ModGenericRemove(["root", "level1", "items", 0, "value"])
+
+        loaded_doc = load_yaml(simple_yaml_file)
+        style = YAMLStyle.detect(simple_yaml_file)
+
+        op.handle_pipeline_file(simple_yaml_file, loaded_doc, style)
+
+        expected = dedent(
+            """\
+            root:
+              level1:
+                items:
+                  - name: item1
+                  - name: item2
+                    value: 2
+                config:
+                  setting1: "value1"
+                  setting2: "value2"
+            """
+        )
+
+        actual = read_file_content(simple_yaml_file)
+        assert actual == expected
+
+    def test_remove_scalar_string_from_pipeline(self, pipeline_yaml_file):
+        """Test removing a scalar string value from pipeline metadata."""
+        op = ModGenericRemove(["metadata", "name"])
+
+        loaded_doc = load_yaml(pipeline_yaml_file)
+        style = YAMLStyle.detect(pipeline_yaml_file)
+
+        op.handle_pipeline_file(pipeline_yaml_file, loaded_doc, style)
+
+        expected = dedent(
+            """\
+            apiVersion: tekton.dev/v1
+            kind: Pipeline
+            spec:
+              tasks:
+                - name: clone
+                  taskRef:
+                    name: git-clone
+                  params:
+                    - name: url
+                      value: "https://github.com/example/repo"
+                    - name: revision
+                      value: "main"
+                - name: build
+                  taskRef:
+                    name: buildah
+                  params:
+                    - name: IMAGE
+                      value: "registry.io/app:latest"
+              params:
+                - name: repo-url
+                  value: "https://github.com/default/repo"
+            """
+        )
+
+        actual = read_file_content(pipeline_yaml_file)
+        assert actual == expected
+
+    def test_remove_scalar_from_param_value(self, pipeline_yaml_file):
+        """Test removing a scalar value from a task parameter."""
+        op = ModGenericRemove(["spec", "tasks", 0, "params", 0, "value"])
+
+        loaded_doc = load_yaml(pipeline_yaml_file)
+        style = YAMLStyle.detect(pipeline_yaml_file)
+
+        op.handle_pipeline_file(pipeline_yaml_file, loaded_doc, style)
+
+        expected = dedent(
+            """\
+            apiVersion: tekton.dev/v1
+            kind: Pipeline
+            metadata:
+              name: test-pipeline
+            spec:
+              tasks:
+                - name: clone
+                  taskRef:
+                    name: git-clone
+                  params:
+                    - name: url
+                    - name: revision
+                      value: "main"
+                - name: build
+                  taskRef:
+                    name: buildah
+                  params:
+                    - name: IMAGE
+                      value: "registry.io/app:latest"
+              params:
+                - name: repo-url
+                  value: "https://github.com/default/repo"
+            """
+        )
+
+        actual = read_file_content(pipeline_yaml_file)
+        assert actual == expected
+
 
 class TestErrorHandling:
     """Test error handling scenarios."""

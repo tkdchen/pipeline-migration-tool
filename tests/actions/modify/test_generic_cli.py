@@ -480,6 +480,43 @@ class TestModifyGenericRemove:
         second_file = second_component_dir.tekton_dir / "build.yaml"
         verify_yaml_path_not_exists(second_file, ["spec", "workspaces"])
 
+    def test_remove_scalar_from_metadata(self, component_pipeline_dir, monkeypatch):
+        """Test removing a scalar value from metadata."""
+        cmd = [
+            "pmt",
+            "modify",
+            "--file-or-dir",
+            str(component_pipeline_dir.tekton_dir),
+            "generic",
+            "remove",
+            '["metadata", "name"]',
+        ]
+
+        monkeypatch.setattr("sys.argv", cmd)
+        entry_point()
+
+        pipeline_file = component_pipeline_dir.tekton_dir / "pipeline.yaml"
+        verify_yaml_path_not_exists(pipeline_file, ["metadata", "name"])
+
+    def test_remove_scalar_with_cascade(self, component_pipeline_dir, monkeypatch):
+        """Test removing a scalar value that triggers cascade deletion."""
+        cmd = [
+            "pmt",
+            "modify",
+            "--file-or-dir",
+            str(component_pipeline_dir.tekton_dir),
+            "generic",
+            "remove",
+            '["spec", "tasks", 0, "taskRef", "name"]',
+        ]
+
+        monkeypatch.setattr("sys.argv", cmd)
+        entry_point()
+
+        pipeline_file = component_pipeline_dir.tekton_dir / "pipeline.yaml"
+        # taskRef should be completely removed since it only had one key
+        verify_yaml_path_not_exists(pipeline_file, ["spec", "tasks", 0, "taskRef"])
+
 
 class TestModifyGenericErrorHandling:
     """Test error handling and edge cases."""

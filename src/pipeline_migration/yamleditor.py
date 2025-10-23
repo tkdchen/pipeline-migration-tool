@@ -206,13 +206,43 @@ class EditYAMLEntry:
         self.invalidate_yaml_data()
 
     def delete(self, path: YAMLPath):
-        """Delete existing sequence or mapping of the given path.
+        """Delete existing sequence, mapping or scalar value of the given path.
 
+        For scalars, the key/index is removed from the parent object.
         Empty items will be deleted by cascade.
 
-        :param path: path in yaml, target object must be list or dict, not a scalar
+        :param path: path in yaml, can point to list, dict, or scalar value
         :type path: YAMLPath
         """
+        # try to get path stack, allowing scalars
+        path_stack = self._get_path_stack(path, allow_scalar=True)
+
+        # check if we're dealing with a scalar (no terminal node with None)
+        is_scalar = path_stack[-1][1] is not None
+
+        if is_scalar:
+            # for scalars, we need to delete the key/index from the parent object
+            if len(path_stack) < 1:
+                raise ValueError("Cannot delete root scalar value")
+
+            parent_node, scalar_key = path_stack[-1]
+
+            # delete the scalar from parent
+            parent_node = copy.deepcopy(parent_node)  # avoid reusing reference
+            del parent_node[scalar_key]
+
+            # Check if parent is now empty, and if so, cascade delete
+            # This is similar to the cascade deletion logic for non-scalar values
+            parent_path = path[:-1]
+
+            # If parent is now empty, we should delete the parent instead
+            if len(parent_node) == 0 and len(parent_path) > 0:
+                # Parent became empty, delete it instead (cascade)
+                return self.delete(parent_path)
+
+            # Parent is not empty, just replace it
+            return self.replace(parent_path, parent_node)
+
         path_stack = self._get_path_stack(path)
 
         # if the entry is the only item of parent, remove also the parent

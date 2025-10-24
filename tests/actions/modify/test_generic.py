@@ -461,7 +461,7 @@ class TestModGenericInsert:
         loaded_doc = load_yaml(yaml_file)
         style = YAMLStyle.detect(yaml_file)
 
-        with pytest.raises(ValueError, match="Scalar values can only be inserted into lists"):
+        with pytest.raises(ValueError, match="Only dict values can be inserted into a dict"):
             op.handle_pipeline_file(yaml_file, loaded_doc, style)
 
 

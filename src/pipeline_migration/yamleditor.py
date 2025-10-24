@@ -105,31 +105,42 @@ class EditYAMLEntry:
     def insert(self, path: YAMLPath, data: Any):
         """Insert data into mapping or sequence, parent node must be specified as path.
 
-        For scalar values, they can only be inserted into lists (sequences).
-        For dict and list values, they can be inserted into either lists or dicts.
+        Insertion rules:
+        - Into dict: only dict values can be inserted
+        - Into list: any type (dict, list, scalar) can be inserted
+        - Into scalar: not supported
 
         :param path: path in yaml, target object must be list or dict, not a scalar
         :type path: YAMLPath
         :param data: data to be injected into path (can be dict, list, or scalar)
         :type data: Any
-        :raises ValueError: if trying to insert a scalar into a dict
+        :raises ValueError: if insertion rules are violated
         """
         path_stack = self._get_path_stack(path)
         last_node, _ = path_stack[-1]
 
-        # Check if data is a scalar value
-        is_scalar = not isinstance(data, (dict, list))
-
-        # Validate insertion rules: scalars can only be inserted into lists
-        if is_scalar and not isinstance(last_node, list):
+        # Validate insertion rules
+        if isinstance(last_node, dict):
+            # Into dict: only dict can be inserted
+            if not isinstance(data, dict):
+                raise ValueError(
+                    "Only dict values can be inserted into a dict. "
+                    f"Cannot insert {type(data).__name__} into dict."
+                )
+        elif isinstance(last_node, list):
+            # Into list: any type can be inserted (no restriction)
+            pass
+        else:
+            # Into anything else (scalar): not supported
             raise ValueError(
-                "Scalar values can only be inserted into lists (sequences). "
-                f"The target path points to a {type(last_node).__name__}."
+                f"Cannot insert into {type(last_node).__name__}. "
+                "Insertion is only supported for dict and list."
             )
 
         if is_flow_style_seq(last_node):
             # we must update the parent via replacing
             last_node = copy.deepcopy(last_node)
+            assert isinstance(last_node, (CommentedMap, CommentedSeq))
             last_node.fa.set_block_style()
             if isinstance(last_node, dict):
                 last_node.update(data)
@@ -137,6 +148,7 @@ class EditYAMLEntry:
                 last_node.append(data)
             return self.replace(path, last_node)
 
+        assert isinstance(last_node, (CommentedMap, CommentedSeq))
         yaml_str = self._gen_yaml_str(data, last_node.lc.col, seq_block=isinstance(last_node, list))
 
         # Appending as last item

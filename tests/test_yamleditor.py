@@ -765,8 +765,15 @@ class TestEditYAMLEntry:
         """Test that inserting a scalar into a dict raises ValueError."""
         editor = EditYAMLEntry(scalar_list_yaml_file)
 
-        with pytest.raises(ValueError, match="Scalar values can only be inserted into lists"):
+        with pytest.raises(ValueError, match="Only dict values can be inserted into a dict"):
             editor.insert(["mixed"], "scalar_value")
+
+    def test_insert_list_into_dict_raises_error(self, scalar_list_yaml_file):
+        """Test that inserting a list into a dict raises ValueError."""
+        editor = EditYAMLEntry(scalar_list_yaml_file)
+
+        with pytest.raises(ValueError, match="Only dict values can be inserted into a dict"):
+            editor.insert(["mixed"], ["item1", "item2"])
 
     def test_replace_dict_value(self, simple_yaml_file):
         """Test replacing a value in a dictionary."""

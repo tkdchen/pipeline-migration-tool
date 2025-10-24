@@ -159,7 +159,8 @@ def register_cli(subparser) -> None:
         "value",
         help=(
             "YAML value (in YAML format) to be inserted. "
-            "Scalar values can only be inserted into lists."
+            "Insertion into map accepts only map values. "
+            "Insertion into sequence accepts any type."
         ),
         metavar="VALUE",
         type=yaml_value_type,

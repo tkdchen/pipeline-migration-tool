@@ -184,19 +184,19 @@ class TestYAMLFromValueParam:
     def test_valid_scalar_string(self):
         """Test parsing a valid scalar string value."""
         value_str = '"just_a_string"'
-        result = _yaml_from_value_param(value_str, allow_scalar=True)
+        result = _yaml_from_value_param(value_str)
         assert result == "just_a_string"
 
     def test_valid_scalar_integer(self):
         """Test parsing a valid scalar integer value."""
         value_str = "42"
-        result = _yaml_from_value_param(value_str, allow_scalar=True)
+        result = _yaml_from_value_param(value_str)
         assert result == 42
 
     def test_valid_scalar_boolean(self):
         """Test parsing a valid scalar boolean value."""
         value_str = "true"
-        result = _yaml_from_value_param(value_str, allow_scalar=True)
+        result = _yaml_from_value_param(value_str)
         assert result is True
 
     def test_invalid_yaml_syntax(self):

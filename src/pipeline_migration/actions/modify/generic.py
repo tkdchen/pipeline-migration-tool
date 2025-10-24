@@ -90,7 +90,7 @@ def yaml_path_type(param: str) -> YAMLPath:
         return yaml_path
 
 
-def _yaml_from_value_param(value: str, allow_scalar: bool = False) -> Any:
+def _yaml_from_value_param(value: str) -> Any:
     """Parses and validates value param"""
 
     def make_block_style_yaml(y):
@@ -111,32 +111,19 @@ def _yaml_from_value_param(value: str, allow_scalar: bool = False) -> Any:
     yaml = create_yaml_obj()
     loaded_value = yaml.load(value)
 
-    if not allow_scalar and not isinstance(loaded_value, (list, dict)):
-        raise ValueError("Value parameter must be YAML sequence or map")
-
     make_block_style_yaml(loaded_value)
 
     return loaded_value
 
 
 def yaml_value_type(param: str) -> Any:
-    "Argparser custom type for yaml value validation"
+    """Argparser custom type for yaml value validation"""
     try:
-        yaml_path = _yaml_from_value_param(param)
+        yaml_value = _yaml_from_value_param(param)
     except Exception as e:
         raise argparse.ArgumentTypeError(str(e))
     else:
-        return yaml_path
-
-
-def yaml_value_allowed_scalar_type(param: str) -> Any:
-    """Argparser custom type for yaml value validation, with allowed scalar value"""
-    try:
-        yaml_path = _yaml_from_value_param(param, allow_scalar=True)
-    except Exception as e:
-        raise argparse.ArgumentTypeError(str(e))
-    else:
-        return yaml_path
+        return yaml_value
 
 
 def register_cli(subparser) -> None:
@@ -175,7 +162,7 @@ def register_cli(subparser) -> None:
             "Scalar values can only be inserted into lists."
         ),
         metavar="VALUE",
-        type=yaml_value_allowed_scalar_type,
+        type=yaml_value_type,
     )
 
     subparser_insert.set_defaults(action=action_insert)
@@ -198,7 +185,7 @@ def register_cli(subparser) -> None:
         "value",
         help="YAML value (in YAML format) to be used as the replacement.",
         metavar="VALUE",
-        type=yaml_value_allowed_scalar_type,
+        type=yaml_value_type,
     )
 
     subparser_replace.set_defaults(action=action_replace)

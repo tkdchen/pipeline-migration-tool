@@ -446,6 +446,25 @@ class TestEditYAMLEntry:
         return create_yaml_file(content)
 
     @pytest.fixture
+    def scalar_list_yaml_file(self, create_yaml_file):
+        """Create a YAML file with lists containing scalar values."""
+        content = dedent(
+            """\
+            strings:
+              - first
+              - second
+            numbers:
+              - 1
+              - 2
+            mixed:
+              key1: value1
+              key2: value2
+            """
+        )
+
+        return create_yaml_file(content)
+
+    @pytest.fixture
     def get_next_entry_test_yaml_file(self, create_yaml_file):
         """Create a temporary YAML file with simple structure."""
         content = dedent(
@@ -667,6 +686,87 @@ class TestEditYAMLEntry:
         )
 
         assert read_file_content(simple_yaml_file_style2) == expected
+
+    def test_insert_scalar_string_into_list(self, scalar_list_yaml_file):
+        """Test inserting a scalar string value into a list."""
+        style = YAMLStyle.detect(scalar_list_yaml_file)
+        editor = EditYAMLEntry(scalar_list_yaml_file, style)
+
+        editor.insert(["strings"], "third")
+
+        expected = dedent(
+            """\
+            strings:
+              - first
+              - second
+              - third
+            numbers:
+              - 1
+              - 2
+            mixed:
+              key1: value1
+              key2: value2
+            """
+        )
+
+        assert read_file_content(scalar_list_yaml_file) == expected
+
+    def test_insert_scalar_integer_into_list(self, scalar_list_yaml_file):
+        """Test inserting a scalar integer value into a list."""
+        style = YAMLStyle.detect(scalar_list_yaml_file)
+        editor = EditYAMLEntry(scalar_list_yaml_file, style)
+
+        editor.insert(["numbers"], 3)
+
+        expected = dedent(
+            """\
+            strings:
+              - first
+              - second
+            numbers:
+              - 1
+              - 2
+              - 3
+            mixed:
+              key1: value1
+              key2: value2
+            """
+        )
+
+        assert read_file_content(scalar_list_yaml_file) == expected
+
+    def test_insert_scalar_boolean_into_list(self, create_yaml_file):
+        """Test inserting a scalar boolean value into a list."""
+        content = dedent(
+            """\
+            flags:
+              - true
+              - false
+            """
+        )
+        yaml_file = create_yaml_file(content)
+        style = YAMLStyle.detect(yaml_file)
+        editor = EditYAMLEntry(yaml_file, style)
+
+        editor.insert(["flags"], True)
+
+        expected = dedent(
+            """\
+            flags:
+              - true
+              - false
+              - true
+            """
+        )
+
+        assert read_file_content(yaml_file) == expected
+
+    def test_insert_scalar_into_dict_raises_error(self, scalar_list_yaml_file):
+        """Test that inserting a scalar into a dict raises ValueError."""
+        editor = EditYAMLEntry(scalar_list_yaml_file)
+
+        with pytest.raises(ValueError, match="Scalar values can only be inserted into lists"):
+            editor.insert(["mixed"], "scalar_value")
 
     def test_replace_dict_value(self, simple_yaml_file):
         """Test replacing a value in a dictionary."""
@@ -1340,6 +1440,12 @@ class TestEditYAMLEntryFlowStyle:
         content = """config: {a: 1, b: 2}\n"""
         return create_yaml_file(content)
 
+    @pytest.fixture
+    def flow_style_scalar_list_file(self, create_yaml_file):
+        """A YAML with a flow-style list containing scalar values."""
+        content = """items: [first, second]\n"""
+        return create_yaml_file(content)
+
     def test_replace_list_item_flow_simple(self, simple_yaml_file_flow):
         """Test replacing an item in a list."""
         editor = EditYAMLEntry(simple_yaml_file_flow)
@@ -1501,6 +1607,38 @@ class TestEditYAMLEntryFlowStyle:
         )
 
         assert read_file_content(flow_style_map_file) == expected
+
+    def test_insert_scalar_string_into_flow_style_list(self, flow_style_scalar_list_file):
+        """Test inserting a scalar string into a flow-style list converts it to block style."""
+        editor = EditYAMLEntry(flow_style_scalar_list_file)
+        editor.insert(["items"], "third")
+
+        expected = dedent(
+            """\
+            items:
+            - first
+            - second
+            - third
+            """
+        )
+
+        assert read_file_content(flow_style_scalar_list_file) == expected
+
+    def test_insert_scalar_integer_into_flow_style_list(self, flow_style_scalar_list_file):
+        """Test inserting a scalar integer into a flow-style list."""
+        editor = EditYAMLEntry(flow_style_scalar_list_file)
+        editor.insert(["items"], 42)
+
+        expected = dedent(
+            """\
+            items:
+            - first
+            - second
+            - 42
+            """
+        )
+
+        assert read_file_content(flow_style_scalar_list_file) == expected
 
     def test_replace_scalar_in_flow_style_dict(self, simple_yaml_file_flow):
         """Test replacing a scalar value in a flow-style dictionary."""

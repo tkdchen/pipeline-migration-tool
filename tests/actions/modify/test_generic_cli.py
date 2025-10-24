@@ -286,6 +286,52 @@ class TestModifyGenericInsert:
         for yaml_file in component_pipeline_dir.tekton_dir.glob("*.yaml"):
             verify_yaml_path_exists(yaml_file, ["spec", "description"], "Test pipeline")
 
+    def test_insert_scalar_text(self, second_component_dir, monkeypatch):
+        """Test inserting a scalar integer into a list."""
+        # Use workspaces list from second component
+        cmd = [
+            "pmt",
+            "modify",
+            "--file-or-dir",
+            str(second_component_dir.tekton_dir),
+            "generic",
+            "insert",
+            '["spec", "workspaces"]',
+            '"output"',
+        ]
+
+        monkeypatch.setattr("sys.argv", cmd)
+        entry_point()
+
+        pipeline_file = second_component_dir.tekton_dir / "build.yaml"
+        doc = load_yaml(pipeline_file)
+        workspaces = doc["spec"]["workspaces"]
+        assert len(workspaces) == 2
+        assert workspaces[1] == "output"
+
+    def test_insert_scalar_integer(self, second_component_dir, monkeypatch):
+        """Test inserting a scalar integer into a list."""
+        # Use workspaces list from second component
+        cmd = [
+            "pmt",
+            "modify",
+            "--file-or-dir",
+            str(second_component_dir.tekton_dir),
+            "generic",
+            "insert",
+            '["spec", "workspaces"]',
+            "404",
+        ]
+
+        monkeypatch.setattr("sys.argv", cmd)
+        entry_point()
+
+        pipeline_file = second_component_dir.tekton_dir / "build.yaml"
+        doc = load_yaml(pipeline_file)
+        workspaces = doc["spec"]["workspaces"]
+        assert len(workspaces) == 2
+        assert workspaces[1] == 404
+
 
 class TestModifyGenericReplace:
     """Test cases for the modify generic replace CLI command."""
@@ -550,24 +596,6 @@ class TestModifyGenericErrorHandling:
             "insert",
             '"not_a_list"',  # Invalid path format
             '{"key": "value"}',
-        ]
-
-        monkeypatch.setattr("sys.argv", cmd)
-
-        with pytest.raises(SystemExit):
-            entry_point()
-
-    def test_invalid_value_format(self, component_pipeline_dir, monkeypatch):
-        """Test handling of invalid value format."""
-        cmd = [
-            "pmt",
-            "modify",
-            "--file-or-dir",
-            str(component_pipeline_dir.tekton_dir),
-            "generic",
-            "insert",
-            '["spec"]',
-            '"just_a_string"',  # Invalid value format (not dict or list)
         ]
 
         monkeypatch.setattr("sys.argv", cmd)

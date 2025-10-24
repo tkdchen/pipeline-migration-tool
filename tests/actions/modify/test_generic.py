@@ -388,6 +388,82 @@ class TestModGenericInsert:
         actual = read_file_content(pipeline_run_yaml_file)
         assert actual == expected
 
+    def test_insert_scalar_string_into_list(self, create_yaml_file):
+        """Test inserting a scalar string value into a list."""
+        content = dedent(
+            """\
+            items:
+              - first
+              - second
+            """
+        )
+        yaml_file = create_yaml_file(content)
+
+        op = ModGenericInsert(["items"], "third")
+        loaded_doc = load_yaml(yaml_file)
+        style = YAMLStyle.detect(yaml_file)
+
+        op.handle_pipeline_file(yaml_file, loaded_doc, style)
+
+        expected = dedent(
+            """\
+            items:
+              - first
+              - second
+              - third
+            """
+        )
+
+        actual = read_file_content(yaml_file)
+        assert actual == expected
+
+    def test_insert_scalar_integer_into_list(self, create_yaml_file):
+        """Test inserting a scalar integer value into a list."""
+        content = dedent(
+            """\
+            numbers:
+              - 1
+              - 2
+            """
+        )
+        yaml_file = create_yaml_file(content)
+
+        op = ModGenericInsert(["numbers"], 3)
+        loaded_doc = load_yaml(yaml_file)
+        style = YAMLStyle.detect(yaml_file)
+
+        op.handle_pipeline_file(yaml_file, loaded_doc, style)
+
+        expected = dedent(
+            """\
+            numbers:
+              - 1
+              - 2
+              - 3
+            """
+        )
+
+        actual = read_file_content(yaml_file)
+        assert actual == expected
+
+    def test_insert_scalar_into_dict_fails(self, create_yaml_file):
+        """Test that inserting a scalar into a dict raises an error."""
+        content = dedent(
+            """\
+            config:
+              key1: value1
+              key2: value2
+            """
+        )
+        yaml_file = create_yaml_file(content)
+
+        op = ModGenericInsert(["config"], "scalar_value")
+        loaded_doc = load_yaml(yaml_file)
+        style = YAMLStyle.detect(yaml_file)
+
+        with pytest.raises(ValueError, match="Scalar values can only be inserted into lists"):
+            op.handle_pipeline_file(yaml_file, loaded_doc, style)
+
 
 class TestModGenericReplace:
     """Test cases for ModGenericReplace class."""

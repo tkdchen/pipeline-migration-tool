@@ -170,9 +170,12 @@ def register_cli(subparser) -> None:
     )
     subparser_insert.add_argument(
         "value",
-        help="YAML sequence or map (in YAML format) to be inserted)",
+        help=(
+            "YAML value (in YAML format) to be inserted. "
+            "Scalar values can only be inserted into lists."
+        ),
         metavar="VALUE",
-        type=yaml_value_type,
+        type=yaml_value_allowed_scalar_type,
     )
 
     subparser_insert.set_defaults(action=action_insert)
@@ -252,7 +255,7 @@ class ModGenericBase(PipelineFileOperation):
 
 
 class ModGenericInsert(ModGenericBase):
-    def __init__(self, yaml_path: YAMLPath, value: dict | list):
+    def __init__(self, yaml_path: YAMLPath, value: Any):
         super().__init__(yaml_path)
         self.value = value
 

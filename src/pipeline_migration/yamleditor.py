@@ -102,16 +102,30 @@ class EditYAMLEntry:
             path_stack.append((current_data, None))  # terminal node
         return path_stack
 
-    def insert(self, path: YAMLPath, data: dict | list):
+    def insert(self, path: YAMLPath, data: Any):
         """Insert data into mapping or sequence, parent node must be specified as path.
+
+        For scalar values, they can only be inserted into lists (sequences).
+        For dict and list values, they can be inserted into either lists or dicts.
 
         :param path: path in yaml, target object must be list or dict, not a scalar
         :type path: YAMLPath
-        :param data: data to be injected into path
-        :type data: dict | list
+        :param data: data to be injected into path (can be dict, list, or scalar)
+        :type data: Any
+        :raises ValueError: if trying to insert a scalar into a dict
         """
         path_stack = self._get_path_stack(path)
         last_node, _ = path_stack[-1]
+
+        # Check if data is a scalar value
+        is_scalar = not isinstance(data, (dict, list))
+
+        # Validate insertion rules: scalars can only be inserted into lists
+        if is_scalar and not isinstance(last_node, list):
+            raise ValueError(
+                "Scalar values can only be inserted into lists (sequences). "
+                f"The target path points to a {type(last_node).__name__}."
+            )
 
         if is_flow_style_seq(last_node):
             # we must update the parent via replacing

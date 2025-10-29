@@ -181,11 +181,23 @@ class TestYAMLFromValueParam:
         }
         assert result == expected
 
-    def test_invalid_value_not_dict_or_list(self):
-        """Test error when value is not a dict or list."""
+    def test_valid_scalar_string(self):
+        """Test parsing a valid scalar string value."""
         value_str = '"just_a_string"'
-        with pytest.raises(ValueError, match="Value parameter must be YAML sequence or map"):
-            _yaml_from_value_param(value_str)
+        result = _yaml_from_value_param(value_str)
+        assert result == "just_a_string"
+
+    def test_valid_scalar_integer(self):
+        """Test parsing a valid scalar integer value."""
+        value_str = "42"
+        result = _yaml_from_value_param(value_str)
+        assert result == 42
+
+    def test_valid_scalar_boolean(self):
+        """Test parsing a valid scalar boolean value."""
+        value_str = "true"
+        result = _yaml_from_value_param(value_str)
+        assert result is True
 
     def test_invalid_yaml_syntax(self):
         """Test error when YAML syntax is invalid."""
@@ -376,6 +388,82 @@ class TestModGenericInsert:
         actual = read_file_content(pipeline_run_yaml_file)
         assert actual == expected
 
+    def test_insert_scalar_string_into_list(self, create_yaml_file):
+        """Test inserting a scalar string value into a list."""
+        content = dedent(
+            """\
+            items:
+              - first
+              - second
+            """
+        )
+        yaml_file = create_yaml_file(content)
+
+        op = ModGenericInsert(["items"], "third")
+        loaded_doc = load_yaml(yaml_file)
+        style = YAMLStyle.detect(yaml_file)
+
+        op.handle_pipeline_file(yaml_file, loaded_doc, style)
+
+        expected = dedent(
+            """\
+            items:
+              - first
+              - second
+              - third
+            """
+        )
+
+        actual = read_file_content(yaml_file)
+        assert actual == expected
+
+    def test_insert_scalar_integer_into_list(self, create_yaml_file):
+        """Test inserting a scalar integer value into a list."""
+        content = dedent(
+            """\
+            numbers:
+              - 1
+              - 2
+            """
+        )
+        yaml_file = create_yaml_file(content)
+
+        op = ModGenericInsert(["numbers"], 3)
+        loaded_doc = load_yaml(yaml_file)
+        style = YAMLStyle.detect(yaml_file)
+
+        op.handle_pipeline_file(yaml_file, loaded_doc, style)
+
+        expected = dedent(
+            """\
+            numbers:
+              - 1
+              - 2
+              - 3
+            """
+        )
+
+        actual = read_file_content(yaml_file)
+        assert actual == expected
+
+    def test_insert_scalar_into_dict_fails(self, create_yaml_file):
+        """Test that inserting a scalar into a dict raises an error."""
+        content = dedent(
+            """\
+            config:
+              key1: value1
+              key2: value2
+            """
+        )
+        yaml_file = create_yaml_file(content)
+
+        op = ModGenericInsert(["config"], "scalar_value")
+        loaded_doc = load_yaml(yaml_file)
+        style = YAMLStyle.detect(yaml_file)
+
+        with pytest.raises(ValueError, match="Only dict values can be inserted into a dict"):
+            op.handle_pipeline_file(yaml_file, loaded_doc, style)
+
 
 class TestModGenericReplace:
     """Test cases for ModGenericReplace class."""
@@ -515,6 +603,33 @@ class TestModGenericReplace:
         actual = read_file_content(simple_yaml_file)
         assert actual == expected
 
+    def test_replace_scalar_string_value(self, simple_yaml_file):
+        """Test replacing a scalar string value."""
+        op = ModGenericReplace(["root", "level1", "config", "setting1"], "new_string_value")
+
+        loaded_doc = load_yaml(simple_yaml_file)
+        style = YAMLStyle.detect(simple_yaml_file)
+
+        op.handle_pipeline_file(simple_yaml_file, loaded_doc, style)
+
+        expected = dedent(
+            """\
+            root:
+              level1:
+                items:
+                  - name: item1
+                    value: 1
+                  - name: item2
+                    value: 2
+                config:
+                  setting1: "new_string_value"
+                  setting2: "value2"
+            """
+        )
+
+        actual = read_file_content(simple_yaml_file)
+        assert actual == expected
+
 
 class TestModGenericRemove:
     """Test cases for ModGenericRemove class."""
@@ -628,6 +743,173 @@ class TestModGenericRemove:
                 - name: clone
                   taskRef:
                     name: git-clone
+                - name: build
+                  taskRef:
+                    name: buildah
+                  params:
+                    - name: IMAGE
+                      value: "registry.io/app:latest"
+              params:
+                - name: repo-url
+                  value: "https://github.com/default/repo"
+            """
+        )
+
+        actual = read_file_content(pipeline_yaml_file)
+        assert actual == expected
+
+    def test_remove_scalar_from_dict(self, simple_yaml_file):
+        """Test removing a scalar value from a dictionary."""
+        op = ModGenericRemove(["root", "level1", "config", "setting1"])
+
+        loaded_doc = load_yaml(simple_yaml_file)
+        style = YAMLStyle.detect(simple_yaml_file)
+
+        op.handle_pipeline_file(simple_yaml_file, loaded_doc, style)
+
+        expected = dedent(
+            """\
+            root:
+              level1:
+                items:
+                  - name: item1
+                    value: 1
+                  - name: item2
+                    value: 2
+                config:
+                  setting2: "value2"
+            """
+        )
+
+        actual = read_file_content(simple_yaml_file)
+        assert actual == expected
+
+    def test_remove_nested_scalar_with_cascade(self, pipeline_yaml_file):
+        """Test removing a nested scalar value that triggers cascade deletion."""
+        op = ModGenericRemove(["spec", "tasks", 0, "taskRef", "name"])
+
+        loaded_doc = load_yaml(pipeline_yaml_file)
+        style = YAMLStyle.detect(pipeline_yaml_file)
+
+        op.handle_pipeline_file(pipeline_yaml_file, loaded_doc, style)
+
+        expected = dedent(
+            """\
+            apiVersion: tekton.dev/v1
+            kind: Pipeline
+            metadata:
+              name: test-pipeline
+            spec:
+              tasks:
+                - name: clone
+                  params:
+                    - name: url
+                      value: "https://github.com/example/repo"
+                    - name: revision
+                      value: "main"
+                - name: build
+                  taskRef:
+                    name: buildah
+                  params:
+                    - name: IMAGE
+                      value: "registry.io/app:latest"
+              params:
+                - name: repo-url
+                  value: "https://github.com/default/repo"
+            """
+        )
+
+        actual = read_file_content(pipeline_yaml_file)
+        assert actual == expected
+
+    def test_remove_scalar_from_list_item(self, simple_yaml_file):
+        """Test removing a scalar value from within a list item."""
+        op = ModGenericRemove(["root", "level1", "items", 0, "value"])
+
+        loaded_doc = load_yaml(simple_yaml_file)
+        style = YAMLStyle.detect(simple_yaml_file)
+
+        op.handle_pipeline_file(simple_yaml_file, loaded_doc, style)
+
+        expected = dedent(
+            """\
+            root:
+              level1:
+                items:
+                  - name: item1
+                  - name: item2
+                    value: 2
+                config:
+                  setting1: "value1"
+                  setting2: "value2"
+            """
+        )
+
+        actual = read_file_content(simple_yaml_file)
+        assert actual == expected
+
+    def test_remove_scalar_string_from_pipeline(self, pipeline_yaml_file):
+        """Test removing a scalar string value from pipeline metadata."""
+        op = ModGenericRemove(["metadata", "name"])
+
+        loaded_doc = load_yaml(pipeline_yaml_file)
+        style = YAMLStyle.detect(pipeline_yaml_file)
+
+        op.handle_pipeline_file(pipeline_yaml_file, loaded_doc, style)
+
+        expected = dedent(
+            """\
+            apiVersion: tekton.dev/v1
+            kind: Pipeline
+            spec:
+              tasks:
+                - name: clone
+                  taskRef:
+                    name: git-clone
+                  params:
+                    - name: url
+                      value: "https://github.com/example/repo"
+                    - name: revision
+                      value: "main"
+                - name: build
+                  taskRef:
+                    name: buildah
+                  params:
+                    - name: IMAGE
+                      value: "registry.io/app:latest"
+              params:
+                - name: repo-url
+                  value: "https://github.com/default/repo"
+            """
+        )
+
+        actual = read_file_content(pipeline_yaml_file)
+        assert actual == expected
+
+    def test_remove_scalar_from_param_value(self, pipeline_yaml_file):
+        """Test removing a scalar value from a task parameter."""
+        op = ModGenericRemove(["spec", "tasks", 0, "params", 0, "value"])
+
+        loaded_doc = load_yaml(pipeline_yaml_file)
+        style = YAMLStyle.detect(pipeline_yaml_file)
+
+        op.handle_pipeline_file(pipeline_yaml_file, loaded_doc, style)
+
+        expected = dedent(
+            """\
+            apiVersion: tekton.dev/v1
+            kind: Pipeline
+            metadata:
+              name: test-pipeline
+            spec:
+              tasks:
+                - name: clone
+                  taskRef:
+                    name: git-clone
+                  params:
+                    - name: url
+                    - name: revision
+                      value: "main"
                 - name: build
                   taskRef:
                     name: buildah

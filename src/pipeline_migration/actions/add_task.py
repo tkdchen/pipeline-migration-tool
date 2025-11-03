@@ -155,6 +155,13 @@ def register_cli(subparser) -> None:
         action="store_true",
         help="Add the modified files to git index.",
     )
+    add_task_parser.add_argument(
+        "-f",
+        "--add-to-finally",
+        action="store_true",
+        dest="add_to_finally",
+        help="Add the task to the 'finally' section instead of the 'tasks' section.",
+    )
     add_task_parser.set_defaults(action=action)
 
 
@@ -166,36 +173,100 @@ class AddTaskOperation(PipelineFileOperation):
         pipeline_task_name: str,
         actual_task_name: str,
         git_add: bool = False,
+        add_to_finally: bool = False,
     ) -> None:
         self.task_config = task_config
         self.pipeline_task_name = pipeline_task_name
         self.actual_task_name = actual_task_name
         self.git_add = git_add
+        self.add_to_finally = add_to_finally
 
     def handle_pipeline_file(self, file_path: FilePath, loaded_doc: Any, style: YAMLStyle) -> None:
-        yaml_path = ["spec", "tasks"]
-        tasks = loaded_doc["spec"]["tasks"]
-        self._handle_pipeline_files(yaml_path, tasks, file_path, style)
+        yaml_path, tasks = self._resolve_path_and_task_list(["spec"], loaded_doc)
+        self._handle_pipeline_files(yaml_path, tasks, file_path, style, loaded_doc)
 
     def handle_pipeline_run_file(
         self, file_path: FilePath, loaded_doc: Any, style: YAMLStyle
     ) -> None:
-        yaml_path = ["spec", "pipelineSpec", "tasks"]
-        tasks = loaded_doc["spec"]["pipelineSpec"]["tasks"]
-        self._handle_pipeline_files(yaml_path, tasks, file_path, style)
+        yaml_path, tasks = self._resolve_path_and_task_list(["spec", "pipelineSpec"], loaded_doc)
+        self._handle_pipeline_files(yaml_path, tasks, file_path, style, loaded_doc)
 
     def _handle_pipeline_files(
-        self, yaml_path: list[str], tasks: Any, file_path: FilePath, style: YAMLStyle
+        self,
+        yaml_path: list[str],
+        tasks: Any,
+        file_path: FilePath,
+        style: YAMLStyle,
+        loaded_doc: Any,
     ) -> None:
         if not self._should_add_task(tasks, str(file_path)):
             return None
 
         yamledit = EditYAMLEntry(file_path, style=style)
-        yamledit.insert(yaml_path, self.task_config)
+        insert_path, insert_data = self._get_insertion_location_and_data(yaml_path, loaded_doc)
+        yamledit.insert(insert_path, insert_data)
 
         if self.git_add:
             git_add(file_path)
             logger.info("%s is added to git index.", file_path)
+
+    def _resolve_path_and_task_list(
+        self,
+        yaml_path: list[str],
+        loaded_doc: Any,
+    ) -> tuple[list[str], CommentedSeq]:
+        """
+        Identify whether to use the 'tasks' or 'finally' list and
+        retrieve its path and current content.
+
+        :param list[str] yaml_path: The path to the pipeline section.
+        :param Any loaded_doc: The loaded YAML document structure.
+        :return: A tuple containing the updated YAML path and the task list content.
+        :rtype: tuple[list[str], CommentedSeq]
+        """
+        section = "tasks"
+        if self.add_to_finally:
+            section = "finally"
+
+        yaml_path.append(section)
+
+        for pipeline_section in yaml_path:
+            loaded_doc = loaded_doc.get(pipeline_section, [])
+
+        return yaml_path, loaded_doc
+
+    def _get_insertion_location_and_data(
+        self, yaml_path: list[str], loaded_doc: Any
+    ) -> tuple[list[str], dict]:
+        """
+        Resolve the correct insertion path and data payload.
+
+        Walks the `yaml_path` within `loaded_doc`:
+        - If the full path exists, it returns the full `yaml_path` and the
+          task config.
+        - If a key ('tasks' or 'finally') is missing, it
+          returns the path *to its parent* and a new `dict` containing the
+          missing key and the new task list.
+
+        :param list[str] yaml_path: The desired path to the task list.
+        :param Any loaded_doc: The loaded document structure.
+        :return: A tuple of (insert_path, insert_data_payload).
+        :rtype: tuple[list[str], dict]
+        """
+        current = loaded_doc
+        existing_path: list[str] = []
+
+        for key in yaml_path:
+            if key not in current:
+                section_name = key
+                task_list = CommentedSeq([self.task_config])
+
+                return existing_path, {section_name: task_list}
+
+            existing_path.append(key)
+            current = current[key]
+
+        return yaml_path, self.task_config
 
     def _should_add_task(self, tasks: CommentedSeq, pipeline_file: str) -> bool:
         """Check if task should be added and log appropriate messages.
@@ -284,7 +355,13 @@ def action(args) -> None:
     if not search_places and relative_tekton_dir.exists():
         search_places = [str(relative_tekton_dir.absolute())]
 
-    op = AddTaskOperation(task_config, pipeline_task_name, actual_task_name, git_add=args.git_add)
+    op = AddTaskOperation(
+        task_config,
+        pipeline_task_name,
+        actual_task_name,
+        git_add=args.git_add,
+        add_to_finally=args.add_to_finally,
+    )
     for file_path in iterate_files_or_dirs(search_places):
         op.handle(str(file_path))
 

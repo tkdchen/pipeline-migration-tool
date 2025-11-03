@@ -42,6 +42,7 @@ class VerifyUpdatedPipeline(PipelineFileOperation):
         pipeline_task_name: str = "",
         skip_checks: bool = False,
         run_after: list[str] | None = None,
+        check_finally: bool = False,
         params: list[dict[str, str]] | None = None,
     ):
         self.task_name = task_name
@@ -49,15 +50,28 @@ class VerifyUpdatedPipeline(PipelineFileOperation):
         self.pipeline_task_name = pipeline_task_name
         self.skip_checks = skip_checks
         self.run_after = run_after
+        self.check_finally = check_finally
         self.params = params
 
     def handle_pipeline_file(self, file_path: FilePath, loaded_doc: Any, style: YAMLStyle) -> None:
-        self.verify(loaded_doc["spec"]["tasks"])
+        if self.check_finally:
+            tasks_section = loaded_doc["spec"].get("finally")
+            assert tasks_section is not None, f"'{file_path}' is missing 'spec.finally' section"
+        else:
+            tasks_section = loaded_doc["spec"]["tasks"]
+        self.verify(tasks_section)
 
     def handle_pipeline_run_file(
         self, file_path: FilePath, loaded_doc: Any, style: YAMLStyle
     ) -> None:
-        self.verify(loaded_doc["spec"]["pipelineSpec"]["tasks"])
+        if self.check_finally:
+            tasks_section = loaded_doc["spec"]["pipelineSpec"].get("finally")
+            assert (
+                tasks_section is not None
+            ), f"'{file_path}' is missing 'spec.pipelineSpec.finally' section"
+        else:
+            tasks_section = loaded_doc["spec"]["pipelineSpec"]["tasks"]
+        self.verify(tasks_section)
 
     def verify(self, tasks: CommentedSeq):
         expected_pipeline_task_name = self.pipeline_task_name or self.task_name
@@ -525,3 +539,40 @@ def test_preserve_yaml_formatting(component_a_repo, component_b_repo, monkeypatc
         assert (
             match
         ), "Expected text should be preserved. YAMLstyle is not set properly to preserve format."
+
+
+@responses.activate
+@pytest.mark.parametrize(
+    "cli_flag, check_finally",
+    [
+        pytest.param([], False, id="default_add_to_tasks"),
+        pytest.param(["-f"], True, id="add_to_finally"),
+        pytest.param(["--add-to-finally"], True, id="add_to_finally_long_flag"),
+    ],
+)
+def test_add_task_to_finally(
+    cli_flag, check_finally, component_b_repo, component_a_repo, monkeypatch
+):
+    mock_http_requests_for_handling_bundle_ref(BUNDLE_REF)
+
+    cmd = [
+        "pmt",
+        "add-task",
+        "--bundle-ref",
+        BUNDLE_REF,
+        *cli_flag,
+        TASK_NAME,
+        str(component_b_repo.tekton_dir),
+        str(component_a_repo.tekton_dir),
+    ]
+
+    monkeypatch.setattr("sys.argv", cmd)
+    entry_point()
+
+    pipeline_files = itertools.chain(
+        component_a_repo.tekton_dir.glob("*.yaml"),
+        component_b_repo.tekton_dir.glob("*.yaml"),
+    )
+    verifier = VerifyUpdatedPipeline(TASK_NAME, BUNDLE_REF, check_finally=check_finally)
+    for yaml_file in pipeline_files:
+        verifier.check(str(yaml_file))

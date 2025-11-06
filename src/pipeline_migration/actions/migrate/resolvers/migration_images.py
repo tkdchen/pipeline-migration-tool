@@ -5,7 +5,7 @@ from collections.abc import Generator
 from operator import itemgetter
 from typing import Any
 
-from packaging.version import parse as parse_version, Version
+from packaging.version import parse as parse_version, Version, InvalidVersion
 
 from pipeline_migration.actions.migrate.constants import (
     MIGRATION_IMAGE_TAG_LIKE_PATTERN,
@@ -112,11 +112,22 @@ class MigrationImagesResolver(Resolver):
             else:
                 version_checksum_pairs[actual_task_version] = migration_image_tag.file_checksum
 
-            if old_version < parse_version(actual_task_version) <= new_version:
+            try:
+                actual_version = parse_version(actual_task_version)
+            except InvalidVersion:
+                logger.warning(
+                    "Skipping migration tag '%s' with invalid task version '%s'. "
+                    "Expected semantic version format: 'X.Y.Z' (e.g., '1.0.0')",
+                    tag_name,
+                    actual_task_version,
+                )
+                continue
+
+            if old_version < actual_version <= new_version:
                 migration_script = self._fetch_migration_script(f"{image_repo}:{tag_name}")
                 migrations.append(
                     (
-                        parse_version(actual_task_version),
+                        actual_version,
                         TaskBundleMigration(
                             task_bundle=f"{image_repo}:{actual_task_version}",
                             migration_script=migration_script,

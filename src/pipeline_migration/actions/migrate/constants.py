@@ -22,9 +22,17 @@ SCHEMA_UPGRADE: Final[dict[str, Any]] = {
     "type": "object",
     "properties": {
         "depName": {"type": "string", "minLength": 1},
-        "currentValue": {"type": "string", "minLength": 1},
+        "currentValue": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": r"^[0-9]+\.[0-9]+(\.[0-9]+)?$",
+        },
         "currentDigest": {"type": "string", "pattern": "^sha256:[0-9a-f]+$"},
-        "newValue": {"type": "string", "minLength": 1},
+        "newValue": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": r"^[0-9]+\.[0-9]+(\.[0-9]+)?$",
+        },
         "newDigest": {"type": "string", "pattern": "^sha256:[0-9a-f]+$"},
         "depTypes": {"type": "array", "items": {"type": "string"}},
         "packageFile": {"type": "string", "minLength": 1},

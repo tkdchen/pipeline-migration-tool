@@ -859,6 +859,60 @@ def test_entry_point_should_catch_error(monkeypatch, caplog):
             ["does not pass schema validation:"],
             id="invalid-digest-for-newDigest",
         ),
+        pytest.param(
+            json.dumps(
+                [
+                    {
+                        "depName": TASK_BUNDLE_CLONE,
+                        "currentValue": "devel",
+                        "currentDigest": generate_digest(),
+                        "newValue": "0.2",
+                        "newDigest": generate_digest(),
+                        "depTypes": ["tekton-bundle"],
+                        "packageFile": "path/to/pipeline-run.yaml",
+                        "parentDir": "path/to",
+                    },
+                ],
+            ),
+            ["does not pass schema validation:"],
+            id="invalid-version-devel-in-currentValue",
+        ),
+        pytest.param(
+            json.dumps(
+                [
+                    {
+                        "depName": TASK_BUNDLE_CLONE,
+                        "currentValue": "v0.1.2",
+                        "currentDigest": generate_digest(),
+                        "newValue": "0.2",
+                        "newDigest": generate_digest(),
+                        "depTypes": ["tekton-bundle"],
+                        "packageFile": "path/to/pipeline-run.yaml",
+                        "parentDir": "path/to",
+                    },
+                ],
+            ),
+            ["does not pass schema validation:"],
+            id="invalid-version-v-prefix-in-currentValue",
+        ),
+        pytest.param(
+            json.dumps(
+                [
+                    {
+                        "depName": TASK_BUNDLE_CLONE,
+                        "currentValue": "0.1",
+                        "currentDigest": generate_digest(),
+                        "newValue": "v0.2.0",
+                        "newDigest": generate_digest(),
+                        "depTypes": ["tekton-bundle"],
+                        "packageFile": "path/to/pipeline-run.yaml",
+                        "parentDir": "path/to",
+                    },
+                ],
+            ),
+            ["does not pass schema validation:"],
+            id="invalid-version-v-prefix-in-newValue",
+        ),
     ],
 )
 def test_cli_stops_if_input_upgrades_is_invalid(upgrades, expected_err_msgs, monkeypatch, caplog):
@@ -1155,3 +1209,47 @@ def test_nonexisting_upgrades_file(capsys, monkeypatch, tmp_path):
     monkeypatch.setattr("sys.exit", lambda *args, **kwargs: 0)
     entry_point()
     assert f"Upgrades file {upgrades_file} does not exist" in capsys.readouterr().err
+
+
+class TestInvalidVersionHandling:
+    """Test handling of invalid semantic versions throughout the migration tool"""
+
+    def test_drop_out_of_order_versions_with_invalid_tag_names(self, caplog):
+        """Test drop_out_of_order_versions skips tags with invalid version names"""
+        from pipeline_migration.actions.migrate.resolvers import drop_out_of_order_versions
+        from pipeline_migration.actions.migrate.models import TaskBundleUpgrade
+
+        bundle_upgrade = TaskBundleUpgrade(
+            dep_name=TASK_BUNDLE_CLONE,
+            current_value="0.1",
+            current_digest="sha256:492fb9ae4e7e",
+            new_value="0.2",
+            new_digest="sha256:c4bb69a3a08f",
+        )
+
+        tags_info = [
+            {
+                "name": "0.2-abc123",
+                "manifest_digest": "sha256:c4bb69a3a08f",
+                "start_ts": 3,
+            },
+            {
+                "name": "devel-abc123",  # Invalid version
+                "manifest_digest": "sha256:f23dc7cd74ba",
+                "start_ts": 2,
+            },
+            {
+                "name": "0.1-def456",
+                "manifest_digest": "sha256:492fb9ae4e7e",
+                "start_ts": 1,
+            },
+        ]
+
+        with caplog.at_level(logging.WARNING):
+            result, current_tag, new_tag, is_out_of_order = drop_out_of_order_versions(
+                tags_info, bundle_upgrade
+            )
+
+            assert len(result) == 2
+            assert all(tag["name"] != "devel-abc123" for tag in result)
+            assert "Skipping tag 'devel-abc123' with invalid version format" in caplog.text

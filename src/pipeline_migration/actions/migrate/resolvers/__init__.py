@@ -12,7 +12,7 @@ from pipeline_migration.quay import QuayTagInfo, list_active_repo_tags
 from collections.abc import Generator, Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Final
-from packaging.version import Version, parse as parse_version
+from packaging.version import Version, parse as parse_version, InvalidVersion
 
 from pipeline_migration.registry import Container
 
@@ -124,17 +124,28 @@ def drop_out_of_order_versions(
     current_digest = bundle_upgrade.current_digest
     new_digest = bundle_upgrade.new_digest
 
-    def _parse_version(tag_name: str) -> Version:
-        return parse_version(tag_name.split("-")[0])
+    def _parse_version(tag_name: str) -> Version | None:
+        try:
+            return parse_version(tag_name.split("-")[0])
+        except InvalidVersion:
+            logger.warning(
+                "Skipping tag '%s' with invalid version format. "
+                "Expected semantic version format: 'X.Y.Z-<hash>' (e.g., '1.0.0-abc123')",
+                tag_name,
+            )
+            return None
 
     for tag in reversed(list(tags_info)):
+        version = _parse_version(tag["name"])
+        if version is None:
+            continue
+
         if current_tag_info is None and tag["manifest_digest"] == current_digest:
             current_tag_info = tag
-            if highest_version_so_far and _parse_version(tag["name"]) < highest_version_so_far:
+            if highest_version_so_far and version < highest_version_so_far:
                 is_out_of_order = True
         elif new_tag_info is None and tag["manifest_digest"] == new_digest:
             new_tag_info = tag
-        version = _parse_version(tag["name"])
         if highest_version_so_far is None or version >= highest_version_so_far:
             tags_that_follow_correct_version_order.append(tag)
             highest_version_so_far = version
@@ -164,8 +175,14 @@ def expand_versions(from_: str, to: str) -> list[str]:
     """
     from_version = parse_version(from_)
     to_version = parse_version(to)
+
     if from_version > to_version:
-        raise ValueError(f"From version {from_} is greater than the to version {to}.")
+        logger.warning(
+            "From version %s is greater than the to version %s. Returning empty version list.",
+            from_,
+            to,
+        )
+        return []
     return [f"0.{minor}" for minor in range(int(from_version.minor), int(to_version.minor) + 1)]
 
 

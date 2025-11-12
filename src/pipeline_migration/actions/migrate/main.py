@@ -318,6 +318,10 @@ def clean_upgrades(input_upgrades: str) -> list[dict[str, Any]]:
         if not dep_name:
             raise InvalidRenovateUpgradesData("Upgrade does not have value of field depName.")
 
+        if "tekton-bundle" not in upgrade.get("depTypes", []):
+            logger.debug("Dependency %s is not handled by tekton-bundle manager.", dep_name)
+            continue
+
         if not comes_from_konflux(dep_name):
             logger.info("Dependency %s does not come from Konflux task definitions.", dep_name)
             continue
@@ -337,10 +341,6 @@ def clean_upgrades(input_upgrades: str) -> list[dict[str, Any]]:
             else:
                 err_msg = f"Invalid upgrades data: {e.message}, path '{e.json_path}'"
             raise InvalidRenovateUpgradesData(err_msg)
-
-        if "tekton-bundle" not in upgrade["depTypes"]:
-            logger.debug("Dependency %s is not handled by tekton-bundle manager.", dep_name)
-            continue
 
         cleaned_upgrades.append(upgrade)
 

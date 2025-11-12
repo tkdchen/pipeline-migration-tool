@@ -822,7 +822,10 @@ def test_entry_point_should_catch_error(monkeypatch, caplog):
     "upgrades,expected_err_msgs",
     [
         ["renovate upgrades which is not a encoded JSON string", ["Expecting value:"]],
-        [f'[{{"depName": "{TASK_BUNDLE_CLONE}"}}]', ["does not pass schema validation:"]],
+        [
+            f'[{{"depName": "{TASK_BUNDLE_CLONE}", "depTypes": ["tekton-bundle"]}}]',
+            ["does not pass schema validation:"],
+        ],
         pytest.param(
             json.dumps(
                 [
@@ -973,6 +976,24 @@ mock_image_digest_2: Final[str] = generate_digest()
             json.dumps(
                 [
                     {
+                        "depName": "quay.io/org/tools",
+                        "currentValue": "",
+                        "currentDigest": mock_image_digest,
+                        "newValue": "",
+                        "newDigest": mock_image_digest,
+                        "packageFile": ".tekton/pipeline.yaml",
+                        "parentDir": ".tekton",
+                        "depTypes": ["tekton-step-image"],
+                    }
+                ],
+            ),
+            [],
+            id="non-tekton-bundle-update",
+        ),
+        pytest.param(
+            json.dumps(
+                [
+                    {
                         "depName": "",
                         "currentValue": "0.1",
                         "currentDigest": mock_image_digest,
@@ -998,6 +1019,7 @@ mock_image_digest_2: Final[str] = generate_digest()
                         "newDigest": generate_digest(),
                         "packageFile": ".tekton/pipeline.yaml",
                         "parentDir": ".tekton",
+                        "depTypes": ["tekton-bundle"],
                     },
                 ],
             ),
@@ -1018,11 +1040,11 @@ mock_image_digest_2: Final[str] = generate_digest()
                     },
                 ],
             ),
-            "depTypes.+is a required property",
+            [],
             id="missing-depTypes-property",
         ),
         pytest.param(
-            json.dumps([{"depName": TASK_BUNDLE_CLONE}]),
+            json.dumps([{"depName": TASK_BUNDLE_CLONE, "depTypes": ["tekton-bundle"]}]),
             "is a required property",
             id="missing-multiple-properties",
         ),

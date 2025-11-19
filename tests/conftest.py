@@ -265,6 +265,7 @@ def pipeline_run_yaml() -> str:
                 - name: name
                   value: git-clone-oci-ta
                 - name: bundle
+                  # value: bundle_ref
                   value: bundle_ref
                 - name: kind
                   value: task

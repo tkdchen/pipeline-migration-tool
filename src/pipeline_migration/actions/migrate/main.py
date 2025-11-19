@@ -1,8 +1,10 @@
 import json
 import logging
 import os.path
+import re
 import subprocess as sp
 import tempfile
+from pathlib import Path
 from typing import Any
 
 from jsonschema.exceptions import ValidationError
@@ -21,6 +23,7 @@ from pipeline_migration.actions.migrate.exceptions import (
     MigrationResolveError,
 )
 from pipeline_migration.actions.migrate.models import PackageFile, TaskBundleUpgrade
+from pipeline_migration.actions.migrate.resolvers import NoopResolver
 from pipeline_migration.actions.migrate.resolvers import Resolver
 from pipeline_migration.actions.migrate.resolvers.migration_images import MigrationImageTag
 
@@ -413,3 +416,19 @@ def has_migration_image(image_repo: str) -> bool:
         except StopIteration:
             break
     return any(results)
+
+
+def update_bundles_in_pipelines(upgrades: list[dict[str, Any]]) -> None:
+
+    manager = TaskBundleUpgradesManager(upgrades, NoopResolver)
+    for package_file in manager.package_files:
+        pipeline_file = Path(package_file.file_path)
+        content = pipeline_file.read_text()
+        for upgrade in package_file.task_bundle_upgrades:
+            repo = upgrade.dep_name
+            current_bundle = f"{repo}:{upgrade.current_value}@{upgrade.current_digest}"
+            new_bundle = f"{repo}:{upgrade.new_value}@{upgrade.new_digest}"
+            content = content.replace(current_bundle, new_bundle)
+            regex = rf"(\s+value: ){current_bundle}"
+            content = re.sub(regex, rf"\1{new_bundle}", content)
+        pipeline_file.write_text(content)

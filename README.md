@@ -3,6 +3,21 @@
 Pipeline migration tool is command line tool applying migrations for Konflux pipelines. It also
 allows to modify Konflux build pipelines locally.
 
+## Installation
+
+Install with pipx from the main branch:
+
+```bash
+pipx install https://github.com/konflux-ci/pipeline-migration-tool
+```
+
+Or, choose a version from [releases], for example:
+
+```bash
+pipx install https://github.com/konflux-ci/pipeline-migration-tool/archive/refs/tags/v0.5.0.tar.gz
+```
+
+
 ## Commands
 
 ### To apply migrations with `migrate`
@@ -353,3 +368,6 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
+
+
+[releases]: https://github.com/konflux-ci/pipeline-migration-tool/releases

@@ -1386,4 +1386,9 @@ def test_apply_migration_by_bundle_references(
     else:
         assert len(modified_package_files) == 1
         modified_content = Path(component_a_repo, modified_package_files.pop()).read_text()
-        assert new_bundle in modified_content
+        assert re.search(
+            rf"\s+# value: {new_bundle}", modified_content
+        ), "Bundle reference is not detected from value field correctly."
+        assert re.search(
+            rf"\s+value: {new_bundle}", modified_content
+        ), "Bundle reference is not updated to the new one."

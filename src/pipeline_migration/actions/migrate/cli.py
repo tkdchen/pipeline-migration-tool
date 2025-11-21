@@ -72,7 +72,9 @@ def arg_type_upgrades_file(value: str) -> Path:
 
 
 def arg_type_pipeline_file(value: str) -> str:
-    p = arg_type_upgrades_file(value)
+    p = Path(value)
+    if not p.exists():
+        raise argparse.ArgumentTypeError(f"Pipeline file does not exist: {value}")
     cur_dir = Path(".").absolute()
     if p.absolute().is_relative_to(cur_dir):
         return str(p)

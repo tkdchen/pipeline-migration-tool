@@ -203,7 +203,7 @@ def generate_upgrades_data(new_bundles: list[str], pipeline_files: list[str]) ->
             new_c = Container(bundle_ref)
             dep_name = f"{new_c.registry}/{new_c.api_prefix}"
             regex = regex_bundle_value.replace("dep_name", dep_name)
-            if match := re.search(regex, content):
+            for match in re.finditer(regex, content):
                 _, current_bundle_ref, current_tag, current_digest = match.groups()
                 if current_bundle_ref == bundle_ref:
                     logger.info(

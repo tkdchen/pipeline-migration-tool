@@ -6,6 +6,7 @@ import re
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
+from textwrap import dedent
 from typing import Final
 
 from responses.matchers import query_param_matcher
@@ -1322,10 +1323,76 @@ def test_generate_upgrades_data(
     assert generate_upgrades_data(new_bundles, pipeline_files) == expected
 
 
+BUNDLE_CLONE_0_1: Final = f"{TASK_BUNDLE_CLONE}:0.1@{generate_digest()}"
+BUNDLE_CLONE_0_2_1: Final = f"{TASK_BUNDLE_CLONE}:0.2.1@{generate_digest()}"
+BUNDLE_CLONE_0_3: Final = f"{TASK_BUNDLE_CLONE}:0.3@{generate_digest()}"
+
+PUSH_PIPELINE_RUN_YAML_TO_UPDATE: Final = dedent(
+    f"""\
+    apiVersion: tekton.dev/v1
+    kind: PipelineRun
+    metadata:
+      name: docker-build-oci-ta
+    spec:
+      pipelineSpec:
+        tasks:
+        - name: clone-repo-0
+          taskRef:
+            resolver: bundles
+            params:
+            - name: name
+              value: git-clone-oci-ta
+            - name: bundle
+              # value: {BUNDLE_CLONE_0_1}
+              value: {BUNDLE_CLONE_0_1}
+            - name: kind
+              value: task
+        - name: clone-repo-1
+          taskRef:
+            resolver: bundles
+            params:
+            - name: name
+              value: git-clone-oci-ta
+            - name: bundle
+              value: {BUNDLE_CLONE_0_2_1}
+            - name: kind
+              value: task
+    """
+)
+
+PUSH_PIPELINE_RUN_YAML_UP_TO_DATE: Final = dedent(
+    f"""\
+    apiVersion: tekton.dev/v1
+    kind: PipelineRun
+    metadata:
+      name: docker-build-oci-ta
+    spec:
+      pipelineSpec:
+        tasks:
+        - name: clone
+          taskRef:
+            resolver: bundles
+            params:
+            - name: name
+              value: git-clone-oci-ta
+            - name: bundle
+              value: {BUNDLE_CLONE_0_3}
+            - name: kind
+              value: task
+    """
+)
+
+
 @responses.activate
-@pytest.mark.parametrize("new_bundle_included", [True, False])
+@pytest.mark.parametrize(
+    "push_pipeline_run_yaml",
+    [
+        pytest.param(PUSH_PIPELINE_RUN_YAML_TO_UPDATE, id="to_update"),
+        pytest.param(PUSH_PIPELINE_RUN_YAML_UP_TO_DATE, id="up_to_date"),
+    ],
+)
 def test_apply_migration_by_bundle_references(
-    new_bundle_included, mock_migration_images, component_a_repo, caplog, monkeypatch
+    request, push_pipeline_run_yaml, mock_migration_images, component_a_repo, caplog, monkeypatch
 ):
     """Test apply migration by specifying --new-bundle and --pipeline-file"""
 
@@ -1345,12 +1412,7 @@ def test_apply_migration_by_bundle_references(
         ],
     )
 
-    current_bundle = f"{TASK_BUNDLE_CLONE}:0.1.2@{generate_digest()}"
-    new_bundle = f"{TASK_BUNDLE_CLONE}:0.3@{generate_digest()}"
-
-    push_yaml = component_a_repo.tekton_dir / "push.yaml"
-    bundle_ref = new_bundle if new_bundle_included else current_bundle
-    push_yaml.write_text(push_yaml.read_text().replace("bundle_ref", bundle_ref))
+    (component_a_repo.tekton_dir / "push.yaml").write_text(push_pipeline_run_yaml)
 
     def mock_get_active_tag(image_repo: str, tag: str, tags: list[dict[str, str]]) -> None:
         params = {"page": "1", "onlyActiveTags": "true", "specificTag": tag}
@@ -1359,6 +1421,8 @@ def test_apply_migration_by_bundle_references(
             json={"tags": tags, "has_additional": False},
             match=[query_param_matcher(params)],
         )
+
+    new_bundle = BUNDLE_CLONE_0_3
 
     # Make new bundle validation pass
     c = Container(new_bundle)
@@ -1380,15 +1444,16 @@ def test_apply_migration_by_bundle_references(
 
     entry_point()
 
-    if new_bundle_included:
+    if request.node.callspec.id == "up_to_date":
         assert len(modified_package_files) == 0
         assert f"New bundle {new_bundle} is included in pipeline" in caplog.text
     else:
         assert len(modified_package_files) == 1
         modified_content = Path(component_a_repo, modified_package_files.pop()).read_text()
+
         assert (
             f"# value: {new_bundle}" not in modified_content
         ), "Bundle reference is not detected from value field correctly."
-        assert re.search(
-            rf"\n +value: {new_bundle}", modified_content
-        ), "Bundle reference is not updated to the new one."
+
+        matches = list(re.finditer(rf"\n +value: {new_bundle}", modified_content))
+        assert len(matches) == 2, "Not all bundle references are updated to the new one."

@@ -69,8 +69,3 @@ REGEX_PMT_MODIFY_USAGE = re.compile(
     r"^\s*(pipeline-migration-tool|pmt)[\s\\]+modify\s",
     re.MULTILINE,
 )
-
-# Match bundle value in Pipeline/PipelineRun YAMLs.
-# dep_name must be replaced with the actual bundle name when used.
-# Match group: prefix, full bundle reference, tag, patch version, digest
-REGEX_BUNDLE_REF_VALUE: Final = r"(\s+value: )(dep_name:(\d+\.\d+(\.\d+)?)@(sha256:[0-9a-f]{64}))"

@@ -1345,7 +1345,7 @@ def test_apply_migration_by_bundle_references(
         ],
     )
 
-    current_bundle = f"{TASK_BUNDLE_CLONE}:0.1@{generate_digest()}"
+    current_bundle = f"{TASK_BUNDLE_CLONE}:0.1.2@{generate_digest()}"
     new_bundle = f"{TASK_BUNDLE_CLONE}:0.3@{generate_digest()}"
 
     push_yaml = component_a_repo.tekton_dir / "push.yaml"
@@ -1386,9 +1386,9 @@ def test_apply_migration_by_bundle_references(
     else:
         assert len(modified_package_files) == 1
         modified_content = Path(component_a_repo, modified_package_files.pop()).read_text()
-        assert re.search(
-            rf"\s+# value: {new_bundle}", modified_content
+        assert (
+            f"# value: {new_bundle}" not in modified_content
         ), "Bundle reference is not detected from value field correctly."
         assert re.search(
-            rf"\s+value: {new_bundle}", modified_content
+            rf"\n +value: {new_bundle}", modified_content
         ), "Bundle reference is not updated to the new one."

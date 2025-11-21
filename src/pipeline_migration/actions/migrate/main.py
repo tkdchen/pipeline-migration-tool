@@ -427,7 +427,6 @@ def update_bundles_in_pipelines(upgrades: list[dict[str, Any]]) -> None:
         for upgrade in package_file.task_bundle_upgrades:
             current_bundle = upgrade.current_bundle
             new_bundle = upgrade.new_bundle
-            content = content.replace(current_bundle, new_bundle)
-            regex = rf"(\s+value: ){current_bundle}"
+            regex = rf"(\n +value: ){current_bundle}"
             content = re.sub(regex, rf"\1{new_bundle}", content)
         pipeline_file.write_text(content)

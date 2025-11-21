@@ -15,7 +15,6 @@ from pipeline_migration.actions.migrate.main import clean_upgrades
 from pipeline_migration.actions.migrate.main import migrate
 from pipeline_migration.actions.migrate.main import update_bundles_in_pipelines
 from pipeline_migration.actions.migrate.constants import logger
-from pipeline_migration.actions.migrate.constants import REGEX_BUNDLE_REF_VALUE
 from pipeline_migration.actions.migrate.resolvers import Resolver
 from pipeline_migration.actions.migrate.resolvers.simple import SimpleIterationResolver
 from pipeline_migration.actions.migrate.resolvers.transition_proxy import (
@@ -188,6 +187,10 @@ def generate_upgrades_data(new_bundles: list[str], pipeline_files: list[str]) ->
         ``upgrades`` has.
     :rtype: str
     """
+    # Match bundle value in Pipeline/PipelineRun YAMLs.
+    # dep_name is replaced with the actual bundle name.
+    # Match group: prefix, full bundle reference, tag, patch version, digest
+    regex_bundle_value: Final = r"(\n +value: )(dep_name:(\d+\.\d+(\.\d+)?)@(sha256:[0-9a-f]{64}))"
     upgrades: list[RenovateUpgradeT] = []
     for pipeline_file in pipeline_files:
         with open(pipeline_file, "r") as f:
@@ -195,7 +198,7 @@ def generate_upgrades_data(new_bundles: list[str], pipeline_files: list[str]) ->
         for bundle_ref in new_bundles:
             new_c = Container(bundle_ref)
             dep_name = f"{new_c.registry}/{new_c.api_prefix}"
-            regex = REGEX_BUNDLE_REF_VALUE.replace("dep_name", dep_name)
+            regex = regex_bundle_value.replace("dep_name", dep_name)
             if match := re.search(regex, content):
                 _, current_bundle_ref, current_tag, _, current_digest = match.groups()
                 if current_bundle_ref == bundle_ref:

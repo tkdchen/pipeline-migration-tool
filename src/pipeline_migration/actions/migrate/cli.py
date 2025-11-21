@@ -120,7 +120,7 @@ def register_cli(subparser) -> None:
         type=arg_type_bundle_reference,
         help="Migrate to this new task bundle. It must be a valid image reference including both "
         "tag and digest. This option can be specified multiple times to handle multiple bundle "
-        "upgrades. This option works with-p/--pipeline-file to apply migrations to specific "
+        "upgrades. This option works with -p/--pipeline-file to apply migrations to specific "
         "pipelines.",
     )
     migrate_parser.add_argument(

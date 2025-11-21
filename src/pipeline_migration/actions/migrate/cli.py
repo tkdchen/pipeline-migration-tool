@@ -191,8 +191,10 @@ def generate_upgrades_data(new_bundles: list[str], pipeline_files: list[str]) ->
     """
     # Match bundle value in Pipeline/PipelineRun YAMLs.
     # dep_name is replaced with the actual bundle name.
-    # Match group: prefix, full bundle reference, tag, patch version, digest
-    regex_bundle_value: Final = r"(\n +value: )(dep_name:(\d+\.\d+(\.\d+)?)@(sha256:[0-9a-f]{64}))"
+    # Match group: prefix, full bundle reference, tag, digest
+    regex_bundle_value: Final = (
+        r"(\n +value: )(dep_name:(\d+\.\d+(?:\.\d+)?)@(sha256:[0-9a-f]{64}))"
+    )
     upgrades: list[RenovateUpgradeT] = []
     for pipeline_file in pipeline_files:
         with open(pipeline_file, "r") as f:
@@ -202,7 +204,7 @@ def generate_upgrades_data(new_bundles: list[str], pipeline_files: list[str]) ->
             dep_name = f"{new_c.registry}/{new_c.api_prefix}"
             regex = regex_bundle_value.replace("dep_name", dep_name)
             if match := re.search(regex, content):
-                _, current_bundle_ref, current_tag, _, current_digest = match.groups()
+                _, current_bundle_ref, current_tag, current_digest = match.groups()
                 if current_bundle_ref == bundle_ref:
                     logger.info(
                         "New bundle %s is included in pipeline file already: %s",

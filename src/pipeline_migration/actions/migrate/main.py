@@ -181,7 +181,8 @@ class TaskBundleUpgradesManager:
     @staticmethod
     def collect_upgrades(upgrades: list[dict[str, Any]]) -> Iterable[PackageFile]:
         """Collect task bundle upgrades grouped by package file"""
-        grouped_upgrades = groupby(upgrades, key=itemgetter("packageFile"))
+        sorted_upgrades = sorted(upgrades, key=itemgetter("packageFile"))
+        grouped_upgrades = groupby(sorted_upgrades, key=itemgetter("packageFile"))
         for package_file, grouped_items in grouped_upgrades:
             package_file = PackageFile(file_path=package_file, parent_dir="")
             for upgrade in grouped_items:

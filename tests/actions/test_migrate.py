@@ -5,6 +5,7 @@ import logging
 import re
 import subprocess
 from copy import deepcopy
+from operator import attrgetter
 from pathlib import Path
 from typing import Any, Final
 from unittest.mock import patch
@@ -335,7 +336,24 @@ class TestTaskBundleUpgradesManagerCollectUpgrades:
 
     def test_collect_upgrades(self):
         manager = TaskBundleUpgradesManager(self.test_upgrades, SimpleIterationResolver)
-        assert len(manager._task_bundle_upgrades) == 3
+
+        dep_names = [item.dep_name for item in manager._task_bundle_upgrades.values()]
+        assert sorted(dep_names) == sorted([TASK_BUNDLE_CLONE, TASK_BUNDLE_TESTS, TASK_BUNDLE_LINT])
+
+        assert sorted(map(attrgetter("file_path"), manager.package_files)) == sorted(
+            [".tekton/component-a-pull-request.yaml", ".tekton/component-a-push.yaml"]
+        )
+
+        for package_file in manager.package_files:
+            match package_file.file_path:
+                case ".tekton/component-a-pull-request.yaml":
+                    dep_names = [item.dep_name for item in package_file.task_bundle_upgrades]
+                    assert sorted(dep_names) == sorted(
+                        [TASK_BUNDLE_CLONE, TASK_BUNDLE_TESTS, TASK_BUNDLE_LINT]
+                    )
+                case ".tekton/component-a-push.yaml":
+                    dep_names = [item.dep_name for item in package_file.task_bundle_upgrades]
+                    assert sorted(dep_names) == sorted([TASK_BUNDLE_CLONE, TASK_BUNDLE_TESTS])
 
 
 class TestFetchMigrationFile:

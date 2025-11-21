@@ -4,6 +4,9 @@ import os.path
 import re
 import subprocess as sp
 import tempfile
+from collections.abc import Iterable
+from itertools import groupby
+from operator import itemgetter
 from pathlib import Path
 from typing import Any
 
@@ -23,7 +26,6 @@ from pipeline_migration.actions.migrate.exceptions import (
     MigrationResolveError,
 )
 from pipeline_migration.actions.migrate.models import PackageFile, TaskBundleUpgrade
-from pipeline_migration.actions.migrate.resolvers import NoopResolver
 from pipeline_migration.actions.migrate.resolvers import Resolver
 from pipeline_migration.actions.migrate.resolvers.migration_images import MigrationImageTag
 
@@ -167,44 +169,39 @@ class TaskBundleUpgradesManager:
     def __init__(self, upgrades: list[dict[str, Any]], resolver_class: type["Resolver"]) -> None:
         # Deduplicated task bundle upgrades. Key is the full bundle image with tag and digest.
         self._task_bundle_upgrades: dict[str, TaskBundleUpgrade] = {}
-
-        # Grouped task bundle upgrades by package file. Key is the package file path.
-        # One package file may have the more than one task bundle upgrades, that reference the
-        # objects in the ``_task_bundle_upgrades``.
-        self._package_file_updates: dict[str, PackageFile] = {}
-
+        # Grouped task bundle upgrades by package file
+        self._package_files: list[PackageFile] = []
         self._resolver = resolver_class()
-
         self._collect(upgrades)
 
     @property
     def package_files(self) -> list[PackageFile]:
-        return list(self._package_file_updates.values())
+        return self._package_files
+
+    @staticmethod
+    def collect_upgrades(upgrades: list[dict[str, Any]]) -> Iterable[PackageFile]:
+        """Collect task bundle upgrades grouped by package file"""
+        grouped_upgrades = groupby(upgrades, key=itemgetter("packageFile"))
+        for package_file, grouped_items in grouped_upgrades:
+            package_file = PackageFile(file_path=package_file, parent_dir="")
+            for upgrade in grouped_items:
+                package_file.parent_dir = upgrade["parentDir"]
+                bundle_upgrade = TaskBundleUpgrade(
+                    dep_name=upgrade["depName"],
+                    current_value=upgrade["currentValue"],
+                    current_digest=upgrade["currentDigest"],
+                    new_value=upgrade["newValue"],
+                    new_digest=upgrade["newDigest"],
+                )
+                package_file.task_bundle_upgrades.append(bundle_upgrade)
+            yield package_file
 
     def _collect(self, upgrades: list[dict[str, Any]]) -> None:
-        for upgrade in upgrades:
-            task_bundle_upgrade = TaskBundleUpgrade(
-                dep_name=upgrade["depName"],
-                current_value=upgrade["currentValue"],
-                current_digest=upgrade["currentDigest"],
-                new_value=upgrade["newValue"],
-                new_digest=upgrade["newDigest"],
-            )
-            package_file = PackageFile(
-                file_path=upgrade["packageFile"],
-                parent_dir=upgrade["parentDir"],
-            )
-
-            tb_update = self._task_bundle_upgrades.get(task_bundle_upgrade.current_bundle)
-            if tb_update is None:
-                self._task_bundle_upgrades[task_bundle_upgrade.current_bundle] = task_bundle_upgrade
-                tb_update = task_bundle_upgrade
-
-            pf = self._package_file_updates.get(package_file.file_path)
-            if pf is None:
-                self._package_file_updates[package_file.file_path] = package_file
-                pf = package_file
-            pf.task_bundle_upgrades.append(tb_update)
+        for package_file in self.collect_upgrades(upgrades):
+            self._package_files.append(package_file)
+            for bundle_upgrade in package_file.task_bundle_upgrades:
+                if bundle_upgrade.current_bundle not in self._task_bundle_upgrades:
+                    self._task_bundle_upgrades[bundle_upgrade.current_bundle] = bundle_upgrade
 
     def resolve_migrations(self) -> None:
         """Resolve migrations for given task bundle upgrades"""
@@ -419,9 +416,8 @@ def has_migration_image(image_repo: str) -> bool:
 
 
 def update_bundles_in_pipelines(upgrades: list[dict[str, Any]]) -> None:
-
-    manager = TaskBundleUpgradesManager(upgrades, NoopResolver)
-    for package_file in manager.package_files:
+    package_files = TaskBundleUpgradesManager.collect_upgrades(upgrades)
+    for package_file in package_files:
         pipeline_file = Path(package_file.file_path)
         content = pipeline_file.read_text()
         for upgrade in package_file.task_bundle_upgrades:

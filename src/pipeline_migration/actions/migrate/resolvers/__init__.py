@@ -292,12 +292,3 @@ def determine_task_bundle_upgrades_range(
     else:
         the_range = tags_info[new_pos:current_pos]
     return [QuayTagInfo.from_tag_info(item) for item in the_range]
-
-
-class NoopResolver(Resolver):
-    """A resolver doing nothing"""
-
-    def _resolve_migrations(
-        self, bundle_upgrade: TaskBundleUpgrade, upgrades_range: list[QuayTagInfo]
-    ) -> Generator[TaskBundleMigration, Any, None]:
-        yield TaskBundleMigration(task_bundle="", migration_script="")

@@ -6,8 +6,12 @@ import re
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
+from textwrap import dedent
 from typing import Final
 
+from responses.matchers import query_param_matcher
+
+from pipeline_migration.actions.migrate.cli import generate_upgrades_data
 import responses
 import pytest
 from oras.types import container_type
@@ -363,8 +367,8 @@ class MockRegistry(Registry):
 def mock_has_migration_images(image_repo: str, has: bool):
     """Help resolver proxy to switch resolvers
 
-    Tags used in this mock does not affect other tests. They only help has_migration_images method
-    to make decision.
+    Tags used in this mock do not affect other tests. They only help has_migration_images method
+    to make a decision.
     """
     c = Container(image_repo)
     api_url = f"https://quay.io/api/v1/repository/{c.api_prefix}/tag/"
@@ -1275,3 +1279,181 @@ class TestInvalidVersionHandling:
             assert len(result) == 2
             assert all(tag["name"] != "devel-abc123" for tag in result)
             assert "Skipping tag 'devel-abc123' with invalid version format" in caplog.text
+
+
+TASK_CLONE_BUNDLE_REF: Final = f"{TASK_BUNDLE_CLONE}:0.1@{generate_digest()}"
+NEW_TASK_CLONE_BUNDLE_REF: Final = f"{TASK_BUNDLE_CLONE}:0.2@{generate_digest()}"
+
+
+@pytest.mark.parametrize(
+    "new_bundles,pipeline_files,expected",
+    [
+        [[], [], "[]"],
+        [[NEW_TASK_CLONE_BUNDLE_REF], [], "[]"],
+        [[], [".tekton/pr.yaml"], "[]"],
+        pytest.param(
+            [NEW_TASK_CLONE_BUNDLE_REF],
+            [".tekton/pr.yaml", ".tekton/push.yaml"],
+            json.dumps(
+                [
+                    {
+                        "depName": "quay.io/konflux-ci/catalog/task-clone",
+                        "currentValue": "0.1",
+                        "currentDigest": TASK_CLONE_BUNDLE_REF.split("@")[1],
+                        "newValue": "0.2",
+                        "newDigest": NEW_TASK_CLONE_BUNDLE_REF.split("@")[1],
+                        "depTypes": ["tekton-bundle"],
+                        "packageFile": ".tekton/push.yaml",
+                        "parentDir": ".tekton/",
+                    },
+                ],
+            ),
+            id="generate-upgrades",
+        ),
+    ],
+)
+def test_generate_upgrades_data(
+    new_bundles, pipeline_files, expected, monkeypatch, component_a_repo
+):
+    monkeypatch.chdir(component_a_repo)
+
+    push_yaml = component_a_repo.tekton_dir / "push.yaml"
+    push_yaml.write_text(push_yaml.read_text().replace("bundle_ref", TASK_CLONE_BUNDLE_REF))
+
+    assert generate_upgrades_data(new_bundles, pipeline_files) == expected
+
+
+BUNDLE_CLONE_0_1: Final = f"{TASK_BUNDLE_CLONE}:0.1@{generate_digest()}"
+BUNDLE_CLONE_0_2_1: Final = f"{TASK_BUNDLE_CLONE}:0.2.1@{generate_digest()}"
+BUNDLE_CLONE_0_3: Final = f"{TASK_BUNDLE_CLONE}:0.3@{generate_digest()}"
+
+PUSH_PIPELINE_RUN_YAML_TO_UPDATE: Final = dedent(
+    f"""\
+    apiVersion: tekton.dev/v1
+    kind: PipelineRun
+    metadata:
+      name: docker-build-oci-ta
+    spec:
+      pipelineSpec:
+        tasks:
+        - name: clone-repo-0
+          taskRef:
+            resolver: bundles
+            params:
+            - name: name
+              value: git-clone-oci-ta
+            - name: bundle
+              # value: {BUNDLE_CLONE_0_1}
+              value: {BUNDLE_CLONE_0_1}
+            - name: kind
+              value: task
+        - name: clone-repo-1
+          taskRef:
+            resolver: bundles
+            params:
+            - name: name
+              value: git-clone-oci-ta
+            - name: bundle
+              value: {BUNDLE_CLONE_0_2_1}
+            - name: kind
+              value: task
+    """
+)
+
+PUSH_PIPELINE_RUN_YAML_UP_TO_DATE: Final = dedent(
+    f"""\
+    apiVersion: tekton.dev/v1
+    kind: PipelineRun
+    metadata:
+      name: docker-build-oci-ta
+    spec:
+      pipelineSpec:
+        tasks:
+        - name: clone
+          taskRef:
+            resolver: bundles
+            params:
+            - name: name
+              value: git-clone-oci-ta
+            - name: bundle
+              value: {BUNDLE_CLONE_0_3}
+            - name: kind
+              value: task
+    """
+)
+
+
+@responses.activate
+@pytest.mark.parametrize(
+    "push_pipeline_run_yaml",
+    [
+        pytest.param(PUSH_PIPELINE_RUN_YAML_TO_UPDATE, id="to_update"),
+        pytest.param(PUSH_PIPELINE_RUN_YAML_UP_TO_DATE, id="up_to_date"),
+    ],
+)
+def test_apply_migration_by_bundle_references(
+    request, push_pipeline_run_yaml, mock_migration_images, component_a_repo, caplog, monkeypatch
+):
+    """Test apply migration by specifying --new-bundle and --pipeline-file"""
+
+    caplog.set_level(logging.DEBUG, logger="migrate")
+    mock_has_migration_images(TASK_BUNDLE_CLONE, True)
+
+    ts_gen = generate_timestamp()
+    mock_migration_images(
+        TASK_BUNDLE_CLONE,
+        [
+            {"name": f"migration-0.2.1-{generate_sha256sum()}-{ts_gen()}"},
+            {"name": f"migration-0.3-{generate_sha256sum()}-{ts_gen()}"},
+        ],
+        migration_scripts=[
+            'pmt modify -f "$pipeline_file" task add-param',
+            'pmt modify -f "$pipeline_file" task remove-param',
+        ],
+    )
+
+    (component_a_repo.tekton_dir / "push.yaml").write_text(push_pipeline_run_yaml)
+
+    def mock_get_active_tag(image_repo: str, tag: str, tags: list[dict[str, str]]) -> None:
+        params = {"page": "1", "onlyActiveTags": "true", "specificTag": tag}
+        responses.get(
+            f"https://quay.io/api/v1/repository/{image_repo}/tag/",
+            json={"tags": tags, "has_additional": False},
+            match=[query_param_matcher(params)],
+        )
+
+    new_bundle = BUNDLE_CLONE_0_3
+
+    # Make new bundle validation pass
+    c = Container(new_bundle)
+    mock_get_active_tag(c.api_prefix, c.tag, [{"name": c.tag, "manifest_digest": c.digest}])
+
+    cli_cmd = ["pmt", "migrate", "--new-bundle", new_bundle]
+    monkeypatch.setattr("sys.argv", cli_cmd)
+
+    # To check if expected pipeline files are handled
+    modified_package_files: set[str] = set([])
+
+    def _subprocess_run(cmd, *args, **kwargs):
+        pipeline_file = cmd[-1]
+        modified_package_files.add(pipeline_file)
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("subprocess.run", _subprocess_run)
+    monkeypatch.chdir(component_a_repo)
+
+    entry_point()
+
+    if request.node.callspec.id == "up_to_date":
+        assert len(modified_package_files) == 0
+        assert f"New bundle {new_bundle} is included in pipeline" in caplog.text
+    else:
+        assert len(modified_package_files) == 1
+        modified_content = Path(component_a_repo, modified_package_files.pop()).read_text()
+
+        assert (
+            f"# value: {new_bundle}" not in modified_content
+        ), "Bundle reference is not detected from value field correctly."
+
+        matches = list(re.finditer(rf"\n +value: {new_bundle}", modified_content))
+        assert len(matches) == 2, "Not all bundle references are updated to the new one."

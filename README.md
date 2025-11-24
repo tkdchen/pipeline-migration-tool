@@ -86,6 +86,20 @@ The field names map to the [Renovate template fields]
 
 To generate the list, handlebars built-in `each` helper of Renovate is used.
 
+### Manual task bundles updates
+
+Use `--new-bundle` argument to do manual bundles updates:
+
+```bash
+pmt migrate \
+--new-bundle quay.io/konflux-ci/tekton-catalog/task-push-dockerfile-oci-ta:0.1@sha256:08bba4a659ecd48f871bef00b80af58954e5a09fcbb28a1783ddd640c4f6535e \
+--new-bundle quay.io/konflux-ci/tekton-catalog/task-init@sha256:4072de81ade0a75ad1eaa5449a7ff02bba84757064549a81b48c28fab3aeca59
+```
+
+`--new-bundle` accepts a full bundle reference with both tag and digest.
+
+By default, `migrate` searches Pipeline/PipelineRun YAML files from directory `.tekton/`. Alternatively, use `--pipeline-file` to specify a specific one.
+
 ### Add a Konflux task to build pipeline with `add-task`
 
 Sub-command `add-task` provides rich options to add a Konflux task to build pipelines in local

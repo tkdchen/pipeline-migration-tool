@@ -53,7 +53,7 @@ class PipelineFileOperation:
                 )
         else:
             raise NotAPipelineFile(
-                f"Given file {file_path} does not have knownn kind Pipeline or PipelineRun."
+                f"Given file {file_path} does not have known kind Pipeline or PipelineRun."
             )
 
 

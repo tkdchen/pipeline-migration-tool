@@ -100,7 +100,7 @@ class TestPipelineFileOperationHandleMethod:
             ),
             pytest.param(
                 "apiVersion: tekton.dev/v1\nspec:",
-                "does not have knownn kind Pipeline or PipelineRun",
+                "does not have known kind Pipeline or PipelineRun",
                 id="unknown-kind",
             ),
         ],

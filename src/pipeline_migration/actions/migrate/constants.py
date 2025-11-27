@@ -34,7 +34,12 @@ SCHEMA_UPGRADE: Final[dict[str, Any]] = {
             "pattern": r"^[0-9]+\.[0-9]+(\.[0-9]+)?$",
         },
         "newDigest": {"type": "string", "pattern": "^sha256:[0-9a-f]+$"},
-        "depTypes": {"type": "array", "items": {"type": "string"}},
+        "depTypes": {
+            "type": "array",
+            "items": {"const": "tekton-bundle"},
+            "minItems": 1,
+            "maxItems": 1,
+        },
         "packageFile": {"type": "string", "minLength": 1},
         "parentDir": {"type": "string", "minLength": 1},
     },

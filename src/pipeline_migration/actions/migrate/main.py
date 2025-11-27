@@ -314,34 +314,17 @@ def clean_upgrades(input_upgrades: str) -> list[dict[str, Any]]:
         if not upgrade:
             continue  # silently ignore any falsy objects
 
-        dep_name = upgrade.get("depName")
-
-        if not dep_name:
-            raise InvalidRenovateUpgradesData("Upgrade does not have value of field depName.")
-
-        if "tekton-bundle" not in upgrade.get("depTypes", []):
-            logger.debug("Dependency %s is not handled by tekton-bundle manager.", dep_name)
-            continue
-
-        if not comes_from_konflux(dep_name):
-            logger.info("Dependency %s does not come from Konflux task definitions.", dep_name)
-            continue
-
         try:
             validator.validate(upgrade)
         except ValidationError as e:
-            if e.path:  # path could be empty due to missing required properties
-                field = e.path[0]
-            else:
-                field = ""
+            logger.warning("Upgrade data does not pass schema validation, skip it: %r", upgrade)
+            logger.warning("Validation error: %s", e)
+            continue
 
-            logger.error("Input upgrades data does not pass schema validation: %s", e)
-
-            if e.validator == "minLength":
-                err_msg = f"Property {field} is empty: {e.message}"
-            else:
-                err_msg = f"Invalid upgrades data: {e.message}, path '{e.json_path}'"
-            raise InvalidRenovateUpgradesData(err_msg)
+        dep_name = upgrade["depName"]
+        if not comes_from_konflux(dep_name):
+            logger.info("Dependency %s does not come from Konflux task definitions.", dep_name)
+            continue
 
         cleaned_upgrades.append(upgrade)
 

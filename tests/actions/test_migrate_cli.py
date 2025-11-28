@@ -823,111 +823,17 @@ def test_entry_point_should_catch_error(monkeypatch, caplog):
 
 
 @pytest.mark.parametrize(
-    "upgrades,expected_err_msgs",
+    "upgrades,err_msg",
     [
-        ["renovate upgrades which is not a encoded JSON string", ["Expecting value:"]],
-        [
-            f'[{{"depName": "{TASK_BUNDLE_CLONE}", "depTypes": ["tekton-bundle"]}}]',
-            ["does not pass schema validation:"],
-        ],
-        pytest.param(
-            json.dumps(
-                [
-                    {
-                        "depName": TASK_BUNDLE_CLONE,
-                        "currentValue": "0.1",
-                        "currentDigest": "sha256:digest",
-                        "newValue": "0.1",
-                        "newDigest": generate_digest(),
-                        "depTypes": ["tekton-bundle"],
-                        "packageFile": "path/to/pipeline-run.yaml",
-                        "parentDir": "path/to",
-                    },
-                ],
-            ),
-            ["does not pass schema validation:"],
-            id="invalid-digest-for-currentDigest",
-        ),
-        pytest.param(
-            json.dumps(
-                [
-                    {
-                        "depName": TASK_BUNDLE_CLONE,
-                        "currentValue": "0.1",
-                        "currentDigest": generate_digest(),
-                        "newValue": "0.1",
-                        "newDigest": "sha256:digest",
-                        "depTypes": ["tekton-bundle"],
-                        "packageFile": "path/to/pipeline-run.yaml",
-                        "parentDir": "path/to",
-                    },
-                ],
-            ),
-            ["does not pass schema validation:"],
-            id="invalid-digest-for-newDigest",
-        ),
-        pytest.param(
-            json.dumps(
-                [
-                    {
-                        "depName": TASK_BUNDLE_CLONE,
-                        "currentValue": "devel",
-                        "currentDigest": generate_digest(),
-                        "newValue": "0.2",
-                        "newDigest": generate_digest(),
-                        "depTypes": ["tekton-bundle"],
-                        "packageFile": "path/to/pipeline-run.yaml",
-                        "parentDir": "path/to",
-                    },
-                ],
-            ),
-            ["does not pass schema validation:"],
-            id="invalid-version-devel-in-currentValue",
-        ),
-        pytest.param(
-            json.dumps(
-                [
-                    {
-                        "depName": TASK_BUNDLE_CLONE,
-                        "currentValue": "v0.1.2",
-                        "currentDigest": generate_digest(),
-                        "newValue": "0.2",
-                        "newDigest": generate_digest(),
-                        "depTypes": ["tekton-bundle"],
-                        "packageFile": "path/to/pipeline-run.yaml",
-                        "parentDir": "path/to",
-                    },
-                ],
-            ),
-            ["does not pass schema validation:"],
-            id="invalid-version-v-prefix-in-currentValue",
-        ),
-        pytest.param(
-            json.dumps(
-                [
-                    {
-                        "depName": TASK_BUNDLE_CLONE,
-                        "currentValue": "0.1",
-                        "currentDigest": generate_digest(),
-                        "newValue": "v0.2.0",
-                        "newDigest": generate_digest(),
-                        "depTypes": ["tekton-bundle"],
-                        "packageFile": "path/to/pipeline-run.yaml",
-                        "parentDir": "path/to",
-                    },
-                ],
-            ),
-            ["does not pass schema validation:"],
-            id="invalid-version-v-prefix-in-newValue",
-        ),
+        ["renovate upgrades which is not a encoded JSON string", "Expecting value:"],
+        ["{}", "Input upgrades is not a list"],
     ],
 )
-def test_cli_stops_if_input_upgrades_is_invalid(upgrades, expected_err_msgs, monkeypatch, caplog):
+def test_cli_stops_caused_by_malformed_input_upgrades(upgrades, err_msg, monkeypatch, caplog):
     cli_cmd = ["pmt", "migrate", "-u", upgrades]
     monkeypatch.setattr("sys.argv", cli_cmd)
     assert entry_point() == 1
-    for err_msg in expected_err_msgs:
-        assert err_msg in caplog.text
+    assert err_msg in caplog.text
 
 
 @pytest.mark.parametrize("upgrades", ["", "[]", "[{}]"])
@@ -971,11 +877,7 @@ mock_image_digest_2: Final[str] = generate_digest()
         pytest.param("100", "is not a list", id="skip-handling-malformed-input-upgrades"),
         pytest.param("[]", [], id="empty-upgrades-list-results-in-empty-result"),
         pytest.param("[{}]", [], id="ignore-falsy-objects"),
-        pytest.param(
-            json.dumps([{"currentValue": "0.2"}]),
-            "does not have value of field depName",
-            id="depName-is-not-included",
-        ),
+        pytest.param(json.dumps([{"currentValue": "0.2"}]), [], id="missing-properties"),
         pytest.param(
             json.dumps(
                 [
@@ -1005,11 +907,11 @@ mock_image_digest_2: Final[str] = generate_digest()
                         "newDigest": mock_image_digest,
                         "packageFile": ".tekton/pipeline.yaml",
                         "parentDir": ".tekton",
-                        "depTypes": ["tekton-bundle", "some-manager"],
+                        "depTypes": ["tekton-bundle"],
                     },
                 ],
             ),
-            "does not have value of field depName",
+            [],
             id="depName-is-included-but-empty",
         ),
         pytest.param(
@@ -1017,18 +919,36 @@ mock_image_digest_2: Final[str] = generate_digest()
                 [
                     {
                         "depName": TASK_BUNDLE_CLONE,
-                        "currentValue": "",
-                        "currentDigest": generate_digest(),
-                        "newValue": "0.1",
-                        "newDigest": generate_digest(),
+                        "currentValue": "v0.1.1",
+                        "currentDigest": mock_image_digest,
+                        "newValue": "0.2",
+                        "newDigest": mock_image_digest,
                         "packageFile": ".tekton/pipeline.yaml",
                         "parentDir": ".tekton",
                         "depTypes": ["tekton-bundle"],
                     },
                 ],
             ),
-            "Property currentValue is empty",
-            id="empty-property-digest",
+            [],
+            id="invalid-version-in-currentValue",
+        ),
+        pytest.param(
+            json.dumps(
+                [
+                    {
+                        "depName": TASK_BUNDLE_CLONE,
+                        "currentValue": "0.2",
+                        "currentDigest": mock_image_digest,
+                        "newValue": "devel",
+                        "newDigest": mock_image_digest,
+                        "packageFile": ".tekton/pipeline.yaml",
+                        "parentDir": ".tekton",
+                        "depTypes": ["tekton-bundle"],
+                    },
+                ],
+            ),
+            [],
+            id="invalid-version-in-newValue",
         ),
         pytest.param(
             json.dumps(
@@ -1048,11 +968,6 @@ mock_image_digest_2: Final[str] = generate_digest()
             id="missing-depTypes-property",
         ),
         pytest.param(
-            json.dumps([{"depName": TASK_BUNDLE_CLONE, "depTypes": ["tekton-bundle"]}]),
-            "is a required property",
-            id="missing-multiple-properties",
-        ),
-        pytest.param(
             json.dumps(
                 [
                     {
@@ -1063,12 +978,12 @@ mock_image_digest_2: Final[str] = generate_digest()
                         "newDigest": generate_digest(),
                         "packageFile": ".tekton/pipeline.yaml",
                         "parentDir": ".tekton",
-                        "depTypes": ["some-manager"],
+                        "depTypes": ["tekton-bundle", "some-manager"],
                     },
                 ],
             ),
             [],
-            id="missing-tekton-bundle-in-depTypes",
+            id="depTypes-has-multiple-managers",
         ),
         pytest.param(
             json.dumps(
@@ -1099,7 +1014,7 @@ mock_image_digest_2: Final[str] = generate_digest()
                         "newDigest": mock_image_digest,
                         "packageFile": ".tekton/pipeline.yaml",
                         "parentDir": ".tekton",
-                        "depTypes": ["tekton-bundle", "some-manager"],
+                        "depTypes": ["tekton-bundle"],
                     },
                 ],
             ),
@@ -1112,7 +1027,7 @@ mock_image_digest_2: Final[str] = generate_digest()
                     "newDigest": mock_image_digest,
                     "packageFile": ".tekton/pipeline.yaml",
                     "parentDir": ".tekton",
-                    "depTypes": ["tekton-bundle", "some-manager"],
+                    "depTypes": ["tekton-bundle"],
                 },
             ],
             id="normal-work",
@@ -1129,14 +1044,14 @@ mock_image_digest_2: Final[str] = generate_digest()
                         "newDigest": mock_image_digest,
                         "packageFile": ".tekton/pipeline.yaml",
                         "parentDir": ".tekton",
-                        "depTypes": ["tekton-bundle", "some-manager"],
+                        "depTypes": ["tekton-bundle"],
                     },
                     {
                         "depName": "registry.access.redhat.com/ubi9/ubi",
                         "currentValue": "9.2",
-                        "currentDigest": "",
+                        "currentDigest": mock_image_digest,
                         "newValue": "9.3",
-                        "newDigest": "",
+                        "newDigest": mock_image_digest,
                         "packageFile": ".tekton/pipeline.yaml",
                         "parentDir": ".tekton",
                         "depTypes": ["tekton-image-step"],
@@ -1152,15 +1067,14 @@ mock_image_digest_2: Final[str] = generate_digest()
                     "newDigest": mock_image_digest,
                     "packageFile": ".tekton/pipeline.yaml",
                     "parentDir": ".tekton",
-                    "depTypes": ["tekton-bundle", "some-manager"],
+                    "depTypes": ["tekton-bundle"],
                 },
             ],
-            id="normal-work-by-cleaning-up-the-unexpected-upgrade",
+            id="filter-out-non-tekton-bundle-upgrade",
         ),
         pytest.param(
             json.dumps(
                 [
-                    "set_local_test",
                     {
                         "depName": TASK_BUNDLE_CLONE,
                         "currentValue": "0.1",
@@ -1209,13 +1123,12 @@ mock_image_digest_2: Final[str] = generate_digest()
         ),
     ],
 )
-def test_clean_upgrades(upgrades_json_s, expected, monkeypatch):
+def test_clean_upgrades(request, upgrades_json_s, expected, monkeypatch):
     if isinstance(expected, str):
         with pytest.raises(InvalidRenovateUpgradesData, match=expected):
             clean_upgrades(upgrades_json_s)
     else:
-        if '"set_local_test",' in upgrades_json_s:
-            upgrades_json_s = upgrades_json_s.replace('"set_local_test",', "")
+        if request.node.callspec.id == "normal-work-with-local-test-set":
             monkeypatch.setenv("PMT_LOCAL_TEST", "1")
         assert clean_upgrades(upgrades_json_s) == expected
 

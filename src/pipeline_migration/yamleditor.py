@@ -326,7 +326,7 @@ class EditYAMLEntry:
             return isinstance(parent, dict)
         return False
 
-    def _get_next_entry_line(self, path_stack) -> int | None:
+    def _get_next_entry_line(self, path_stack: PathStack) -> int | None:
         """Find lineno where the next item in yaml starts.
 
         Method looks for sibling item, if sibling doesn't exist
@@ -342,19 +342,21 @@ class EditYAMLEntry:
         """
         path_stack = copy.copy(path_stack)
 
-        def find_next_sibling(node, index):
-            if isinstance(node, list):
+        def find_next_sibling_line(node, index) -> int | None:
+            if isinstance(node, CommentedSeq):
                 assert isinstance(index, int)
                 if len(node) - 1 > index:
-                    return node[index + 1]  # sibling is just next item in array
-            elif isinstance(node, dict):
+                    return node[index + 1].lc.line  # sibling is just next item in array
+            elif isinstance(node, CommentedMap):
 
                 assert isinstance(index, str)
                 # we rely on python dict feature that ordering is kept
                 keys = tuple(node.keys())
                 key_idx = keys.index(index)
                 if len(keys) - 1 > key_idx:
-                    return node[keys[key_idx + 1]]
+                    next_key = keys[key_idx + 1]
+                    line, _ = node.lc.key(next_key)
+                    return line
 
             # other types cannot be used to find siblings
             # sibling doesn't exist
@@ -366,18 +368,12 @@ class EditYAMLEntry:
             if index is None:
                 # terminal element, we cannot find sibling from this level
                 continue
-            sibling = find_next_sibling(node, index)
-            if sibling is None:
+            sibling_line = find_next_sibling_line(node, index)
+            if sibling_line is None:
                 # sibling doesn't exist, continue to next level
                 continue
 
-            line = sibling.lc.line
-
-            # if (parent) node is dict, ruamel reports line+1 for key, get the real position
-            if isinstance(node, dict):
-                line = max(line - 1, 0)
-
-            return line
+            return sibling_line
 
         return EOF
 

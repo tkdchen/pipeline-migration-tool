@@ -475,6 +475,14 @@ class TestEditYAMLEntry:
                 - name: task0
                 - name: task1
                   taskRef:
+                    params:
+                    - name: name
+                      value: task1
+                    - name: bundle
+                      value: bundle-ref
+                    resolver: bundles
+                - name: task2
+                  taskRef:
                     name: clone
                   params:
                   - name: param1
@@ -1177,11 +1185,12 @@ class TestEditYAMLEntry:
             (["spec"], EOF),
             (["spec", "tasks"], EOF),
             (["spec", "tasks", 0], 4),
-            (["spec", "tasks", 1], EOF),
-            (["spec", "tasks", 1, "taskRef"], 7),
-            (["spec", "tasks", 1, "params"], EOF),
-            (["spec", "tasks", 1, "params", 0], 10),
-            (["spec", "tasks", 1, "params", 1], EOF),
+            (["spec", "tasks", 1, "taskRef", "params", 1], 11),
+            (["spec", "tasks", 2], EOF),
+            (["spec", "tasks", 2, "taskRef"], 15),
+            (["spec", "tasks", 2, "params"], EOF),
+            (["spec", "tasks", 2, "params", 0], 18),
+            (["spec", "tasks", 2, "params", 1], EOF),
         ],
     )
     def test__get_next_entry_line(self, get_next_entry_test_yaml_file, yaml_path, expected_lineno):

@@ -1370,3 +1370,59 @@ def test_apply_migration_by_bundle_references(
 
         matches = list(re.finditer(rf"\n +value: {new_bundle}", modified_content))
         assert len(matches) == 2, "Not all bundle references are updated to the new one."
+
+
+def test_log_data_on_failure_enabled(tmp_path, monkeypatch, caplog):
+    """
+    Test that --log-data-on-failure causes the upgrades file content
+    to be logged when an exception occurs.
+    """
+    caplog.set_level(logging.ERROR, logger="migrate")
+
+    upgrades_content = "{ this is not valid json }"
+    upgrades_file = tmp_path / "upgrades_crash_test.json"
+    upgrades_file.write_text(upgrades_content)
+
+    cli_cmd = ["pmt", "migrate", "-f", str(upgrades_file), "--log-data-on-failure"]
+    monkeypatch.setattr("sys.argv", cli_cmd)
+
+    def mock_action_impl_fail(args):
+        raise RuntimeError("Simulated unexpected failure")
+
+    monkeypatch.setattr(
+        "pipeline_migration.actions.migrate.cli._action_impl", mock_action_impl_fail
+    )
+
+    exit_code = entry_point()
+    assert exit_code == 1
+
+    assert "Dumping upgrades file content due to failure" in caplog.text
+    assert upgrades_content in caplog.text
+
+
+def test_log_data_on_failure_disabled(tmp_path, monkeypatch, caplog):
+    """
+    Test that without --log-data-on-failure, the upgrades file content
+    is NOT logged when an exception occurs.
+    """
+    caplog.set_level(logging.ERROR, logger="migrate")
+
+    upgrades_content = "{ this is not valid json }"
+    upgrades_file = tmp_path / "upgrades_crash_test.json"
+    upgrades_file.write_text(upgrades_content)
+
+    cli_cmd = ["pmt", "migrate", "-f", str(upgrades_file)]
+    monkeypatch.setattr("sys.argv", cli_cmd)
+
+    def mock_action_impl_fail(args):
+        raise RuntimeError("Simulated failure")
+
+    monkeypatch.setattr(
+        "pipeline_migration.actions.migrate.cli._action_impl", mock_action_impl_fail
+    )
+
+    exit_code = entry_point()
+    assert exit_code == 1
+
+    assert "Dumping upgrades file content due to failure" not in caplog.text
+    assert upgrades_content not in caplog.text

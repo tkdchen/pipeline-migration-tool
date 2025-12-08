@@ -141,6 +141,12 @@ def register_cli(subparser) -> None:
         "-b/--new-bundle only. If omitted, pipeline files will be searched from YAML files "
         "under ./.tekton/ directory that have kind Pipeline or PipelineRun.",
     )
+    migrate_parser.add_argument(
+        "--log-data-on-failure",
+        action="store_true",
+        help="Log the content of the upgrades data file if the tool fails. "
+        "This helps debug issues when the tool cannot process the generated data file.",
+    )
     migrate_parser.set_defaults(action=action)
 
 
@@ -230,6 +236,19 @@ def generate_upgrades_data(new_bundles: list[str], pipeline_files: list[str]) ->
 
 
 def action(args) -> None:
+    try:
+        _action_impl(args)
+    except Exception:
+        if args.log_data_on_failure and args.upgrades_file:
+            try:
+                content = args.upgrades_file.read_text()
+                logger.error("Dumping upgrades file content due to failure:\n%s", content)
+            except Exception as read_err:
+                logger.error("Failed to read upgrades file for logging: %s", read_err)
+        raise
+
+
+def _action_impl(args) -> None:
     resolver_class: type[Resolver]
 
     if args.use_legacy_resolver:

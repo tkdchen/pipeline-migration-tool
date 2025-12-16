@@ -200,9 +200,10 @@ class TaskBundleUpgradesManager:
     def _collect(self, upgrades: list[dict[str, Any]]) -> None:
         for package_file in self.collect_upgrades(upgrades):
             self._package_files.append(package_file)
-            for bundle_upgrade in package_file.task_bundle_upgrades:
-                if bundle_upgrade.current_bundle not in self._task_bundle_upgrades:
-                    self._task_bundle_upgrades[bundle_upgrade.current_bundle] = bundle_upgrade
+            package_file.task_bundle_upgrades = [
+                self._task_bundle_upgrades.setdefault(b.current_bundle, b)
+                for b in package_file.task_bundle_upgrades
+            ]
 
     def resolve_migrations(self) -> None:
         """Resolve migrations for given task bundle upgrades"""

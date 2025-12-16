@@ -305,7 +305,7 @@ RENOVATE_UPGRADES: list[dict[str, Any]] = [
         "parentDir": ".tekton/",
         "depTypes": ["tekton-bundle"],
     },
-    # for push
+    # for push. Both are reused by package files.
     {
         "depName": TASK_BUNDLE_CLONE,
         "currentValue": "0.1",
@@ -334,6 +334,24 @@ class TestTaskBundleUpgradesManagerCollectUpgrades:
     def setup_method(self, method):
         self.test_upgrades = deepcopy(RENOVATE_UPGRADES)
 
+    @staticmethod
+    def assert_bundle_upgrade_is_reused(manager: TaskBundleUpgradesManager):
+        """Esnure package file object reuses same bundle upgrade rather than a new object"""
+        for package_file in manager.package_files:
+            for bundle_upgrade in package_file.task_bundle_upgrades:
+                bundle_ref = bundle_upgrade.current_bundle
+                existing = manager._task_bundle_upgrades.get(bundle_ref)
+                msg = (
+                    f"Bundle upgrade {bundle_ref} belonging to PackageFile {package_file} "
+                    "does not exist in _task_bundle_upgrades."
+                )
+                assert existing, msg
+                msg = (
+                    f"Bundle upgrade {bundle_ref} exists in _task_bundle_upgrades, "
+                    f"but not reused in PackageFile object {package_file}"
+                )
+                assert id(existing) == id(bundle_upgrade), msg
+
     def test_collect_upgrades(self):
         manager = TaskBundleUpgradesManager(self.test_upgrades, SimpleIterationResolver)
 
@@ -354,6 +372,8 @@ class TestTaskBundleUpgradesManagerCollectUpgrades:
                 case ".tekton/component-a-push.yaml":
                     dep_names = [item.dep_name for item in package_file.task_bundle_upgrades]
                     assert sorted(dep_names) == sorted([TASK_BUNDLE_CLONE, TASK_BUNDLE_TESTS])
+
+        self.assert_bundle_upgrade_is_reused(manager)
 
 
 class TestFetchMigrationFile:

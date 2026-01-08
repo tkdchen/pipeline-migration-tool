@@ -1,13 +1,9 @@
 import argparse
 import logging
-import re
 from argparse import ArgumentTypeError
-from collections.abc import Generator
 from pathlib import Path
 from typing import Any, Final
 
-import requests
-from packaging.version import parse as parse_version
 from ruamel.yaml.comments import CommentedSeq
 from ruamel.yaml.scalarstring import DoubleQuotedScalarString
 
@@ -20,55 +16,92 @@ from pipeline_migration.utils import YAMLStyle, git_add
 
 logger = logging.getLogger("add_task")
 
-
 SUBCMD_DESCRIPTION: Final = """\
-The following are several examples with a Konflux task push-dockerfile:
+The following are several examples of adding a task.
 
-* Add task with latest bundle to pipelines within relative .tekton/ directory.
+* Add task using a tag (digest is resolved automatically only for quay.io):
 
-    cd /path/to/repo
-    pmt add-task push-dockerfile
+    pmt add-task quay.io/konflux-ci/konflux-vanguard/task-push-dockerfile:0.1
 
-* Add task to multiple pipelines in several repositories:
+* Add task using a full bundle reference (tag and digest validated):
 
-    pmt add-task push-dockerfile \\
+    pmt add-task quay.io/konflux-ci/konflux-vanguard/task-push-dockerfile:0.1@sha256:...
+
+* Add task to multiple pipelines:
+
+    pmt add-task quay.io/konflux-ci/konflux-vanguard/task-push-dockerfile:0.1@sha256:... \\
         /path/to/repo1/.tekton/pr.yaml /path/to/repo2/.tekton/push.yaml
 
 * Add task with parameter and execution order:
 
-    pmt add-task push-dockerfile \\
+    pmt add-task quay.io/konflux-ci/konflux-vanguard/task-push-dockerfile:0.1@sha256:... \\
+        .tekton/pr.yaml .tekton/push.yaml \\
         --param param1=value1 --param param2=value2 \\
         --run-after build-image-index
-
-* Add task with specific bundle reference:
-
-    pmt add-task --bundle-ref <bundle-reference> push-dockerfile
 """
 
 
-class InconsistentBundleBuild(Exception):
-    """Registry does not have expected bundle image"""
+def validate_bundle_ref(bundle_ref: str) -> str:
+    """
+    Validates and resolves the bundle reference.
+
+    - For Quay.io (REGISTRY): Validates the tag against the API.
+      If digest is missing, it resolves and appends it.
+    - For other registries: Strictly requires a full reference (Tag + Digest).
+
+    :param str bundle_ref: Bundle reference, either with just a tag or a full one (Tag + Digest)
+    :return: The fully resolved bundle reference (including digest).
+    :rtype: str
+    """
+    try:
+        c = Container(bundle_ref)
+    except ValueError as e:
+        # The underlying oras Container.parse raises ValueError
+        raise ValueError(f"{bundle_ref} is not a valid image reference: {str(e)}")
+
+    if f":{c.tag}" not in bundle_ref:
+        raise ValueError(f"missing tag in {bundle_ref}. Task bundle reference must have a tag.")
+
+    if c.registry == REGISTRY:
+        tag_info = get_active_tag(c, c.tag)
+        if tag_info is None:
+            raise ValueError(f"tag {c.tag} does not exist in the image repository.")
+
+        active_digest = tag_info["manifest_digest"]
+
+        if c.digest:
+            if active_digest != c.digest:
+                raise ValueError(
+                    f"Mismatch digest. Tag {c.tag} points to a different digest {active_digest}"
+                )
+            return bundle_ref
+        else:
+            return f"{bundle_ref}@{active_digest}"
+    else:
+        # we cannot use Quay API to validate or resolve these,
+        # so we force the user to provide the full immutable reference.
+        if not c.digest:
+            raise ValueError(
+                f"missing digest in {bundle_ref}. For non-Quay registries, "
+                "task bundle reference must have both tag and digest."
+            )
+        if f":{c.tag}@" not in bundle_ref:
+            raise ValueError(
+                f"missing tag in {bundle_ref}. Task bundle reference must have both tag and digest."
+            )
+        return bundle_ref
 
 
-class KonfluxTaskNotExist(Exception):
-    """Konflux task is not found from build-definitions"""
-
-
-class KonfluxTaskFileNotExist(Exception):
-    """Konflux task file does not exist in a version-specific task directory"""
-
-
-def konflux_task_bundle_reference(value: str) -> str:
-    """Argument type for checking input bundle reference
+def get_task_bundle_reference(value: str) -> str:
+    """Argument type for checking and resolving input bundle reference
 
     :raises argparse.ArgumentTypeError: if input bundle reference is invalid.
     """
-    build_def = KonfluxBuildDefinitions()
     try:
-        build_def.validate_bundle_ref(value)
+        resolved_value = validate_bundle_ref(value)
     except ValueError as e:
         raise ArgumentTypeError(str(e))
-    return value
+    return resolved_value
 
 
 def task_param(value: str) -> tuple[str, str]:
@@ -81,17 +114,20 @@ def task_param(value: str) -> tuple[str, str]:
 def register_cli(subparser) -> None:
     add_task_parser = subparser.add_parser(
         "add-task",
-        help="Add a Konflux task to build pipelines.",
+        help="Add a task to build pipelines using a bundle reference.",
         description=SUBCMD_DESCRIPTION,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     add_task_parser.add_argument(
-        "task",
-        help="Konflux task name. This is the actual task name defined in "
-        "konflux-ci/build-definitions. By default, this name is also used as the pipeline task "
-        "name. If a trusted artifact task is being added, suffix -oci-ta is removed automatically "
-        "from the name and the result is used as the pipeline task name. To specify a pipeline "
-        "task name explicitly, use option --pipeline-task-name.",
+        "bundle_ref",
+        type=get_task_bundle_reference,
+        help="The Tekton bundle reference. "
+        "For quay.io, providing just a tag is supported (the digest is resolved automatically). "
+        "For other registries, a full reference (registry/org/repo:tag@digest) is required. "
+        "The pipeline task name is automatically derived from the bundle's repository name "
+        "(e.g., 'quay.io/.../task-check' becomes 'task-check'). "
+        "If the name ends in '-oci-ta', the suffix is removed. "
+        "To specify a pipeline task name explicitly, use option --pipeline-task-name.",
     )
     add_task_parser.add_argument(
         "file_or_dir",
@@ -107,8 +143,10 @@ def register_cli(subparser) -> None:
         "-n",
         "--pipeline-task-name",
         metavar="NAME",
-        help="Specify an alternative name for the task configured in the pipeline. If omitted, "
-        "name is set according to the given actual task name.",
+        help="Specify an alternative name for the task configured in the pipeline. "
+        "If omitted, name is derived from the bundle repository name."
+        "For example, from 'quay.io/konflux-ci/task-sast-coverity-check:0.1@sha256:...' "
+        "the name will be 'task-sast-coverity-check'.",
     )
     add_task_parser.add_argument(
         "-a",
@@ -136,17 +174,6 @@ def register_cli(subparser) -> None:
         action="store_true",
         dest="skip_checks",
         help="Skip this task if it can be skipped as a check for a fast build.",
-    )
-    add_task_parser.add_argument(
-        "-r",
-        "--bundle-ref",
-        type=konflux_task_bundle_reference,
-        metavar="IMAGE_REF",
-        dest="bundle_ref",
-        help="Use Tekton bundle resolver to reference the expected task bundle. "
-        "The full reference has to include both tag and digest, "
-        "e.g. registry/org/task-name:tag@digest."
-        "If omitted, the latest task bundle is queried from the registry.",
     )
     add_task_parser.add_argument(
         "-g",
@@ -273,12 +300,7 @@ class AddTaskOperation(PipelineFileOperation):
 
         Returns True if task should be added, False otherwise.
         """
-        existing_pipeline_task_names = set([])
-        existing_actual_task_names = set([])
-
-        for name1, name2 in KonfluxBuildDefinitions.extract_task_names(tasks):
-            existing_pipeline_task_names.add(name1)
-            existing_actual_task_names.add(name2)
+        existing_pipeline_task_names, existing_actual_task_names = extract_task_names(tasks)
 
         if (depended_tasks := self.task_config.get("runAfter")) is not None:
             for name in depended_tasks:
@@ -316,13 +338,55 @@ class AddTaskOperation(PipelineFileOperation):
         return True
 
 
-def action(args) -> None:
-    actual_task_name: Final = args.task
-    pipeline_task_name: Final = args.pipeline_task_name or args.task.removesuffix("-oci-ta")
+def extract_task_names(tasks: CommentedSeq) -> tuple[set[str], set[str]]:
+    """
+    Extract sets of pipeline task names and actual task names from a task list.
 
-    bundle_ref = args.bundle_ref
-    if not bundle_ref:
-        bundle_ref = KonfluxBuildDefinitions().query_latest_bundle(actual_task_name)
+    :param CommentedSeq tasks: The list of tasks to extract names from.
+    :return: A tuple of (pipeline_names, actual_names).
+    :rtype: tuple[set[str], set[str]]
+    """
+    pipeline_names = set()
+    actual_names = set()
+
+    for t in tasks:
+        p_name = t.get("name")
+        if p_name:
+            pipeline_names.add(p_name)
+        else:
+            logger.warning("Cannot get pipeline task name from %r, skip it.", t)
+            continue
+
+        task_ref = t.get("taskRef")
+        if not task_ref:
+            logger.warning("Task %s does not have taskRef. Skip it.", p_name)
+            continue
+
+        if task_ref.get("resolver") == "bundles":
+            found_actual_name = False
+            for param in task_ref.get("params", []):
+                if param["name"] == "name":
+                    actual_names.add(param["value"])
+                    found_actual_name = True
+                    break
+
+            if not found_actual_name:
+                logger.warning(
+                    "Task %s uses tekton bundle resolver but no actual task name is specified "
+                    "in the resolver.",
+                    p_name,
+                )
+
+    return pipeline_names, actual_names
+
+
+def action(args) -> None:
+    bundle_ref: str = args.bundle_ref
+
+    container = Container(bundle_ref)
+
+    actual_task_name = container.repository.split("/")[-1]
+    pipeline_task_name = args.pipeline_task_name or actual_task_name.removesuffix("-oci-ta")
 
     logger.info("Adding task %s, bundle %s", actual_task_name, bundle_ref)
 
@@ -364,116 +428,3 @@ def action(args) -> None:
     )
     for file_path in iterate_files_or_dirs(search_places):
         op.handle(str(file_path))
-
-
-class KonfluxBuildDefinitions:
-
-    DEFINITIONS_REPO: Final = "konflux-ci/build-definitions"
-    KONFLUX_IMAGE_ORG: Final = "konflux-ci/tekton-catalog"
-    VERSION_REGEX: Final = re.compile(r"^(\d+)\.(\d+)$")
-
-    @staticmethod
-    def extract_task_names(tasks: list[dict[str, Any]]) -> Generator[tuple[str, str]]:
-        """Extract pipeline task name and actual task name from a task list
-
-        :return: a generator that yields a list of two-elements tuples. The first one is the
-            pipeline task name, and the second one is the actual task name.
-        """
-        for t in tasks:
-            pipeline_task_name = t.get("name")
-            if not pipeline_task_name:
-                logger.warning("Cannot get pipeline task name from %r, skip it:", t)
-                continue
-            task_ref = t.get("taskRef")
-            if not task_ref:
-                logger.warning("Task %s does not have taskRef. Skip it.", pipeline_task_name)
-                continue
-            if task_ref.get("resolver") != "bundles":
-                logger.warning("Task %s does not use tekton bundle. Skip it.", pipeline_task_name)
-                continue
-            actual_task_name = None
-            for param in task_ref["params"]:
-                if param["name"] == "name":
-                    actual_task_name = param["value"]
-                    break
-            if not actual_task_name:
-                logger.warning(
-                    "Task %s uses tekton bundle resolver but no actual task name is specified "
-                    "in the resolver. Skip it.",
-                    pipeline_task_name,
-                )
-                continue
-            yield pipeline_task_name, actual_task_name
-
-    @staticmethod
-    def validate_bundle_ref(bundle_ref: str) -> None:
-        try:
-            c = Container(bundle_ref)
-        except ValueError as e:
-            # The underlying oras Container.parse raises ValueError
-            raise ValueError(f"{bundle_ref} is not a valid image reference: {str(e)}")
-        if c.registry != REGISTRY:
-            raise ValueError("Currently only support adding Konflux tasks from quay.io.")
-        if not c.digest:
-            raise ValueError(
-                f"missing digest in {bundle_ref}. Task bundle reference must have both "
-                "tag and digest."
-            )
-        if f":{c.tag}@" not in bundle_ref:
-            raise ValueError(
-                f"missing tag in {bundle_ref}. Task bundle reference must have both tag and digest."
-            )
-        tag_info = get_active_tag(c, c.tag)
-        if tag_info is None:
-            raise ValueError(f"tag {c.tag} does not exist in the image repository.")
-        digest = tag_info["manifest_digest"]
-        if digest != c.digest:
-            raise ValueError(f"Mismatch digest. Tag {c.tag} points to a different digest {digest}")
-
-    def determine_latest_version(self, task_name: str) -> str:
-        url = f"https://api.github.com/repos/{self.DEFINITIONS_REPO}/contents/task/{task_name}"
-        resp = requests.get(url)
-        if resp.status_code == 404:
-            raise KonfluxTaskNotExist(f"Task {task_name} is not found from build-definitions.")
-        resp.raise_for_status()
-
-        def _yield_version():
-            for item in resp.json():
-                version_str = item["name"]
-                if not self.VERSION_REGEX.match(version_str):
-                    raise ValueError(f"Malformed version {version_str}")
-                yield parse_version(version_str)
-
-        ordered = sorted(_yield_version())
-        if not ordered:
-            raise ValueError(f"No version is found for task {task_name}.")
-        return str(ordered[-1])
-
-    def get_task_latest_commit_sha(self, task_name: str, version: str) -> str:
-        url = f"https://api.github.com/repos/{self.DEFINITIONS_REPO}/commits"
-        task_file = f"task/{task_name}/{version}/{task_name}.yaml"
-        params = {"path": task_file, "per_page": "1"}
-        resp = requests.get(url, params=params)
-        resp.raise_for_status()
-        data = resp.json()
-        if not data:
-            raise KonfluxTaskFileNotExist(f"Task file {task_file} does not exist.")
-        if "sha" not in data[0]:
-            raise ValueError("GitHub API /commits response does not include field sha.")
-        return data[0]["sha"]
-
-    def get_digest(self, task_name: str, tag: str) -> str | None:
-        image = f"{REGISTRY}/{self.KONFLUX_IMAGE_ORG}/task-{task_name}"
-        tag_info = get_active_tag(Container(image), tag)
-        return tag_info["manifest_digest"] if tag_info else None
-
-    def query_latest_bundle(self, task_name: str) -> str:
-        task_version = self.determine_latest_version(task_name)
-        commit_sha = self.get_task_latest_commit_sha(task_name, task_version)
-        digest = self.get_digest(task_name, f"{task_version}-{commit_sha}")
-        if not digest:
-            raise InconsistentBundleBuild(
-                f"Konflux image organization {REGISTRY}/{self.KONFLUX_IMAGE_ORG} does not have "
-                f"a task bundle built from latest Git commit {commit_sha}"
-            )
-        return f"{REGISTRY}/{self.KONFLUX_IMAGE_ORG}/task-{task_name}:{task_version}@{digest}"

@@ -10,7 +10,7 @@ from oras.container import Container
 from ruamel.yaml import YAML
 from ruamel.yaml.scanner import ScannerError
 
-from pipeline_migration.actions.add_task import KonfluxBuildDefinitions
+from pipeline_migration.actions.add_task import validate_bundle_ref
 from pipeline_migration.actions.migrate.main import clean_upgrades
 from pipeline_migration.actions.migrate.main import migrate
 from pipeline_migration.actions.migrate.main import update_bundles_in_pipelines
@@ -85,7 +85,7 @@ def arg_type_pipeline_file(value: str) -> str:
 
 def arg_type_bundle_reference(value: str) -> str:
     try:
-        KonfluxBuildDefinitions.validate_bundle_ref(value)
+        validate_bundle_ref(value)
     except ValueError as e:
         raise argparse.ArgumentTypeError(f"Bundle reference {value} is not valid: {e}")
     return value

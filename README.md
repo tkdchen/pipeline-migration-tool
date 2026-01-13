@@ -100,16 +100,26 @@ pmt migrate \
 
 By default, `migrate` searches Pipeline/PipelineRun YAML files from directory `.tekton/`. Alternatively, use `--pipeline-file` to specify a specific one.
 
-### Add a Konflux task to build pipeline with `add-task`
+### Add a task to build pipeline with `add-task`
 
-Sub-command `add-task` provides rich options to add a Konflux task to build pipelines in local
+Sub-command `add-task` provides rich options to add a task via bundle reference to build pipelines in local
 Component repositories. Let's take the task `sast-coverity-check` as an example to see a few
 command usages:
+
+> [!NOTE]
+> Tasks are added via bundle reference. For `quay.io`, you can provide just a tag, and the tool will automatically resolve the digest.
+> For all other registries, a full reference (tag + digest) is required.
+
+* Add task using a tag (digest is resolved automatically for quay.io):
+
+  ```bash
+  pmt add-task quay.io/konflux-ci/tekton-catalog/task-sast-coverity-check:0.1
+  ```
 
 * Add task with latest bundle to pipelines from inside a repository:
 
   ```bash
-  pmt add-task sast-coverity-check
+  pmt add-task quay.io/konflux-ci/tekton-catalog/task-sast-coverity-check:0.1@sha256:...
   ```
 
   where `./.tekton/` is the default location to search pipelines.
@@ -117,16 +127,16 @@ command usages:
 * Add task to multiple locations:
 
   ```bash
-  pmt add-task sast-coverity-check \
+  pmt add-task quay.io/konflux-ci/tekton-catalog/task-sast-coverity-check:0.1@sha256:... \
     /path/to/repo1/pipeline.yaml /path/to/repo2/pipeline-run.yaml ...
   ```
 
-* Specify alternative task bundle explicitly:
+* Specify an alternative name for the task configured in the pipeline:
 
   ```bash
-  pmt add-task --bundle-ref quay.io/konflux-ci/tekton-catalog/task-sast-coverity-check:0.1@sha256:... \
-    sast-coverity-check \
-    /path/to/repo1/pipeline.yaml /path/to/repo2/pipeline-run.yaml ...
+  pmt add-task quay.io/konflux-ci/tekton-catalog/task-sast-coverity-check:0.1@sha256:... \
+    /path/to/repo1/pipeline.yaml /path/to/repo2/pipeline-run.yaml ... \
+    --pipeline-task-name sast-coverity-check
   ```
 
 Get more information by `pmt add-task -h`

@@ -20,6 +20,10 @@ MEDIA_TYPE_OCI_IMAGE_MANIFEST_V1: Final = "application/vnd.oci.image.manifest.v1
 MEDIA_TYPE_OCI_IMAGE_LAYER_V1_TAR: Final = "application/vnd.oci.image.layer.v1.tar"
 MEDIA_TYPE_OCI_IMAGE_LAYER_V1_TAR_GZ: Final = "application/vnd.oci.image.layer.v1.tar+gzip"
 
+REGISTRY_ALLOWLIST: Final[list[str]] = [
+    "quay.io/konflux-ci",
+]
+
 
 @dataclass
 class Descriptor:

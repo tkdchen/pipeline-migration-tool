@@ -8,7 +8,7 @@ allows to modify Konflux build pipelines locally.
 Install with pipx from the main branch:
 
 ```bash
-pipx install https://github.com/konflux-ci/pipeline-migration-tool
+pipx install git+https://github.com/konflux-ci/pipeline-migration-tool
 ```
 
 Or, choose a version from [releases], for example:
